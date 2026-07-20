@@ -68,6 +68,21 @@ class MaskerTests(unittest.TestCase):
         )
         self.assertEqual(sql, unmask_text(masked, mapping))
 
+    def test_masks_unqualified_update_columns(self):
+        sql = '''update "DNA".fee_levels
+        set effectiveness = @PARAM_3
+        where mail_merge_id = @PARAM_02;'''
+        masked, mapping = mask_text(sql, dialect='sybase_asa', embed_mapping=False)
+        self.assertNotIn('effectiveness', masked)
+        self.assertNotIn('mail_merge_id', masked)
+        self.assertEqual(
+            {'effectiveness', 'mail_merge_id'},
+            set(mapping['columns']),
+        )
+        self.assertIn('set COL_', masked)
+        self.assertIn('where COL_', masked)
+        self.assertEqual(sql, unmask_text(masked, mapping))
+
 
 if __name__ == '__main__':
     unittest.main()

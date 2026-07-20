@@ -176,6 +176,39 @@ def extract_query_names(text):
         if qualifier.lower() in qualifiers:
             columns.add(normalize_name(match.group('column')))
 
+    # Assignment targets in UPDATE statements are columns even when they are
+    # not qualified with a table name.
+    set_clause_pattern = re.compile(
+        r'\bSET\s+(?P<body>.*?)(?=\bWHERE\b|\bFROM\b|\bRETURNING\b|\bEND\b|;|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    assignment_pattern = re.compile(
+        rf'(?:^|,)\s*(?P<column>{QUALIFIED_IDENTIFIER})\s*=',
+        re.IGNORECASE,
+    )
+    for set_clause in set_clause_pattern.finditer(text):
+        for assignment in assignment_pattern.finditer(set_clause.group('body')):
+            column = final_identifier(assignment.group('column'))
+            if column and not column.startswith(('@', ':')):
+                columns.add(column)
+
+    # Capture the left-hand column in common predicates such as
+    # ``WHERE mail_merge_id = @mail_merge_id`` and JOIN ``ON`` expressions.
+    predicate_column_pattern = re.compile(
+        rf'(?P<column>{QUALIFIED_IDENTIFIER})\s*'
+        rf'(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bIN\b|\bIS\b|\bBETWEEN\b)',
+        re.IGNORECASE,
+    )
+    for clause in re.finditer(
+        r'\b(?:WHERE|ON|HAVING)\b(?P<body>.*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|\bRETURNING\b|\bEND\b|;|$)',
+        text,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        for predicate in predicate_column_pattern.finditer(clause.group('body')):
+            column = final_identifier(predicate.group('column'))
+            if column and not column.startswith(('@', ':')):
+                columns.add(column)
+
     return tables, columns
 
 
