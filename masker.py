@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""DDL Masking Tool
+
+This script masks database object names and column names in SQL DDL text, producing a masked DDL plus a mapping.
+It can also reverse the masking using the original mapping.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+
+try:
+    import sqlparse
+    SQLPARSE_AVAILABLE = True
+except ImportError:
+    SQLPARSE_AVAILABLE = False
+
+MAP_COMMENT_START = "-- DDL_MASKER_MAPPING_START"
+MAP_COMMENT_END = "-- DDL_MASKER_MAPPING_END"
+
+OBJECT_TYPE_PREFIX = {
+    "table": "TBL",
+    "view": "VW",
+    "procedure": "PROC",
+    "function": "FUNC",
+    "trigger": "TRG",
+    "index": "IDX",
+    "sequence": "SEQ",
+    "type": "TYPE",
+    "column": "COL",
+}
+
+SUPPORTED_DIALECTS = ('generic', 'sybase_asa', 'postgresql')
+
+CREATE_OBJECT_PATTERN = re.compile(
+    r"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(TABLE|VIEW|INDEX|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?:(?:\"[^\"]+\"|\[[^\]]+\]|[\w]+)\s*\.)?"
+    r"(?P<name>\"[^\"]+\"|\[[^\]]+\]|[\w]+)",
+    re.IGNORECASE,
+)
+
+IDENTIFIER_QUOTED_PATTERN = re.compile(r'^(?:"(?P<dq>.+)"|\[(?P<br>.+)\]|(?P<raw>[\w]+))$')
+
+COLUMN_NAME_PATTERN = re.compile(
+    r'^(?P<name>"[^"]+"|\[[^\]]+\]|[\w]+)\s+',
+    re.IGNORECASE,
+)
+
+
+def normalize_name(name):
+    m = IDENTIFIER_QUOTED_PATTERN.match(name.strip())
+    if not m:
+        return name.strip()
+    return m.group("dq") or m.group("br") or m.group("raw")
+
+
+def quote_name(name, quote_char='"'):
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
+        return name
+    if quote_char == '"':
+        return f'"{name}"'
+    return f'[{name}]'
+
+
+def find_balanced_parentheses(text, start_index):
+    depth = 0
+    for i in range(start_index, len(text)):
+        ch = text[i]
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def extract_table_column_names(text):
+    column_names = []
+    for match in re.finditer(
+        r"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+        r"(?:(?:\"[^\"]+\"|\[[^\]]+\]|[\w]+)\s*\.)?"
+        r"(?P<name>\"[^\"]+\"|\[[^\]]+\]|[\w]+)",
+        text,
+        re.IGNORECASE,
+    ):
+        body_start = text.find('(', match.end())
+        if body_start == -1:
+            continue
+        body_end = find_balanced_parentheses(text, body_start)
+        if body_end == -1:
+            continue
+        body = text[body_start + 1:body_end]
+        parts = []
+        current = []
+        depth = 0
+        for ch in body:
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            if ch == ',' and depth == 0:
+                parts.append(''.join(current))
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append(''.join(current))
+        for part in parts:
+            line = part.strip()
+            if not line:
+                continue
+            if line.upper().startswith(('CONSTRAINT ', 'PRIMARY ', 'UNIQUE ', 'FOREIGN ', 'CHECK ', 'REFERENCES ')):
+                continue
+            col_match = COLUMN_NAME_PATTERN.match(line)
+            if col_match:
+                raw_name = normalize_name(col_match.group('name'))
+                if raw_name:
+                    column_names.append(raw_name)
+    return column_names
+
+
+def extract_object_map(text, dialect='generic'):
+    object_map = {
+        "tables": set(),
+        "views": set(),
+        "procedures": set(),
+        "functions": set(),
+        "triggers": set(),
+        "indexes": set(),
+        "sequences": set(),
+        "types": set(),
+        "columns": set(),
+    }
+    if dialect == 'sybase_asa':
+        text = text.replace('CREATE PROCEDURE', 'CREATE PROCEDURE')
+        text = text.replace('CREATE FUNCTION', 'CREATE FUNCTION')
+    elif dialect == 'postgresql':
+        text = text.replace('CREATE OR REPLACE FUNCTION', 'CREATE OR REPLACE FUNCTION')
+        text = text.replace('CREATE OR REPLACE PROCEDURE', 'CREATE OR REPLACE PROCEDURE')
+    for match in CREATE_OBJECT_PATTERN.finditer(text):
+        object_type = match.group(1).lower()
+        name = normalize_name(match.group('name'))
+        if not name:
+            continue
+        if object_type == 'table':
+            object_map['tables'].add(name)
+        elif object_type == 'view':
+            object_map['views'].add(name)
+        elif object_type == 'procedure':
+            object_map['procedures'].add(name)
+        elif object_type == 'function':
+            object_map['functions'].add(name)
+        elif object_type == 'trigger':
+            object_map['triggers'].add(name)
+        elif object_type == 'index':
+            object_map['indexes'].add(name)
+        elif object_type == 'sequence':
+            object_map['sequences'].add(name)
+        elif object_type == 'type':
+            object_map['types'].add(name)
+    column_names = extract_table_column_names(text)
+    for c in column_names:
+        object_map['columns'].add(c)
+    return object_map
+
+
+def build_mapping(object_map):
+    mapping = {}
+    counter = 1
+    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns'):
+        mapping[object_type] = {}
+        prefix = OBJECT_TYPE_PREFIX.get(object_type[:-1] if object_type.endswith('s') else object_type, 'OBJ')
+        for original_name in sorted(object_map[object_type], key=lambda o: o.lower()):
+            mapping[object_type][original_name] = f"{prefix}_{counter}"
+            counter += 1
+    return mapping
+
+
+def mapping_to_text(mapping):
+    return json.dumps(mapping, indent=2, sort_keys=True)
+
+
+def embed_mapping_comment(text, mapping):
+    mapping_text = mapping_to_text(mapping)
+    lines = [MAP_COMMENT_START] + [f"-- {line}" for line in mapping_text.splitlines()] + [MAP_COMMENT_END]
+    return text.rstrip() + '\n\n' + '\n'.join(lines) + '\n'
+
+
+def extract_mapping_from_text(text):
+    start = text.find(MAP_COMMENT_START)
+    end = text.find(MAP_COMMENT_END)
+    if start == -1 or end == -1 or end < start:
+        return None
+    block = text[start + len(MAP_COMMENT_START):end].strip()
+    json_lines = []
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('--'):
+            json_lines.append(stripped[2:].strip())
+        else:
+            json_lines.append(stripped)
+    try:
+        return json.loads('\n'.join(json_lines))
+    except json.JSONDecodeError:
+        return None
+
+
+def replace_identifiers(text, replacements):
+    sorted_pairs = sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True)
+    result = text
+    for original, replacement in sorted_pairs:
+        patterns = [
+            rf'"{re.escape(original)}"',
+            rf'\[{re.escape(original)}\]',
+            rf'\b{re.escape(original)}\b',
+        ]
+        for pattern in patterns:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    return result
+
+
+def mask_text(text, dialect='generic', embed_mapping=True):
+    object_map = extract_object_map(text, dialect)
+    mapping = build_mapping(object_map)
+    replacements = {}
+    for object_type, name_map in mapping.items():
+        for original, masked in name_map.items():
+            replacements[original] = masked
+    masked_text = replace_identifiers(text, replacements)
+    if embed_mapping:
+        masked_text = embed_mapping_comment(masked_text, mapping)
+    return masked_text, mapping
+
+
+def split_text_and_mapping_block(text):
+    start = text.find(MAP_COMMENT_START)
+    if start == -1:
+        return text, ''
+    end = text.find(MAP_COMMENT_END, start)
+    if end == -1:
+        return text, ''
+    end += len(MAP_COMMENT_END)
+    before = text[:start]
+    suffix = text[start:end]
+    if end < len(text):
+        suffix += text[end:]
+    return before, suffix
+
+
+def unmask_text(text, mapping):
+    if mapping is None:
+        raise ValueError('No mapping provided for unmasking.')
+    reverse_replacements = {}
+    for object_type, name_map in mapping.items():
+        for original, masked in name_map.items():
+            reverse_replacements[masked] = original
+    body, suffix = split_text_and_mapping_block(text)
+    unmasked_body = replace_identifiers(body, reverse_replacements)
+    return unmasked_body + suffix
+
+
+def load_text(path):
+    if path:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read()
+    return sys.stdin.read()
+
+
+def write_text(path, text):
+    if path:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+
+
+def load_mapping(path):
+    if path and os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Mask or unmask DDL object names in SQL text.')
+    subparsers = parser.add_subparsers(dest='command', required=True)
+
+    mask_parser = subparsers.add_parser('mask', help='Mask object names in SQL DDL.')
+    mask_parser.add_argument('--input', '-i', help='Source SQL file path. If omitted, stdin is used.')
+    mask_parser.add_argument('--output', '-o', help='Output file path. If omitted, stdout is used.')
+    mask_parser.add_argument('--mapping', '-m', help='Write mapping JSON to this file.')
+    mask_parser.add_argument('--embed-mapping', action='store_true', help='Embed the mapping as SQL comments in the output.')
+    mask_parser.add_argument('--dialect', choices=SUPPORTED_DIALECTS, default='generic', help='Source dialect for SQL parsing.')
+
+    unmask_parser = subparsers.add_parser('unmask', help='Replace masked names with original names.')
+    unmask_parser.add_argument('--input', '-i', help='Source SQL file path. If omitted, stdin is used.')
+    unmask_parser.add_argument('--output', '-o', help='Output file path. If omitted, stdout is used.')
+    unmask_parser.add_argument('--mapping', '-m', help='Load mapping JSON from this file. If omitted, the tool will attempt to read an embedded mapping comment in the input.')
+    unmask_parser.add_argument('--dialect', choices=SUPPORTED_DIALECTS, default='generic', help='Target dialect for SQL parsing.')
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if args.command == 'mask':
+        sql_text = load_text(args.input)
+        masked_text, mapping = mask_text(sql_text, args.dialect, embed_mapping=args.embed_mapping)
+        if args.mapping:
+            with open(args.mapping, 'w', encoding='utf-8') as f:
+                json.dump(mapping, f, indent=2, sort_keys=True)
+        write_text(args.output, masked_text)
+        return 0
+
+    if args.command == 'unmask':
+        sql_text = load_text(args.input)
+        mapping = None
+        if args.mapping:
+            mapping = load_mapping(args.mapping)
+        if mapping is None:
+            mapping = extract_mapping_from_text(sql_text)
+        if mapping is None:
+            print('Error: mapping file not found and no embedded mapping present.', file=sys.stderr)
+            return 2
+        unmasked = unmask_text(sql_text, mapping)
+        write_text(args.output, unmasked)
+        return 0
+
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

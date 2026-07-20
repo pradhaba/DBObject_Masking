@@ -1,0 +1,16 @@
+{
+  "columns": {
+    "Id": "COL_2",
+    "Name": "COL_3"
+  },
+  "functions": {},
+  "indexes": {},
+  "procedures": {},
+  "sequences": {},
+  "tables": {
+    "MyTable": "TBL_1"
+  },
+  "triggers": {},
+  "types": {},
+  "views": {}
+}
