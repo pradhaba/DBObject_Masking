@@ -417,13 +417,36 @@ def split_text_and_mapping_block(text):
     return before, suffix
 
 
-def unmask_text(text, mapping):
+def parameter_name_for_dialect(original, dialect, placeholder_has_sigil):
+    """Restore a parameter name using conventions of the target dialect."""
+    bare_name = original.lstrip('@:')
+    if dialect == 'postgresql':
+        return bare_name
+    if dialect == 'sybase_asa':
+        return original if original.startswith('@') else f'@{bare_name}'
+    # Generic mode follows the placeholder form, allowing translated SQL that
+    # removed a source-dialect sigil to remain valid.
+    return original if placeholder_has_sigil else bare_name
+
+
+def unmask_text(text, mapping, dialect='generic'):
     if mapping is None:
         raise ValueError('No mapping provided for unmasking.')
     reverse_replacements = {}
     for object_type, name_map in mapping.items():
         for original, masked in name_map.items():
-            reverse_replacements[masked] = original
+            if object_type == 'parameters':
+                bare_masked = masked.lstrip('@:')
+                reverse_replacements[masked] = parameter_name_for_dialect(
+                    original, dialect, masked.startswith(('@', ':'))
+                )
+                # Translators commonly remove @ when converting Sybase/SQL
+                # Server routines to PostgreSQL. Accept that token as well.
+                reverse_replacements[bare_masked] = parameter_name_for_dialect(
+                    original, dialect, False
+                )
+            else:
+                reverse_replacements[masked] = original
     body, suffix = split_text_and_mapping_block(text)
     unmasked_body = replace_identifiers(body, reverse_replacements)
     return unmasked_body + suffix
@@ -492,7 +515,7 @@ def main():
         if mapping is None:
             print('Error: mapping file not found and no embedded mapping present.', file=sys.stderr)
             return 2
-        unmasked = unmask_text(sql_text, mapping)
+        unmasked = unmask_text(sql_text, mapping, args.dialect)
         write_text(args.output, unmasked)
         return 0
 

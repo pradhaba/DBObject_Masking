@@ -102,7 +102,7 @@ def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_te
             messagebox.showerror('DDL Masker', 'No mapping JSON found. Provide a mapping file or include an embedded mapping comment.')
             return
         try:
-            unmasked = unmask_text(ddl_text, mapping)
+            unmasked = unmask_text(ddl_text, mapping, dialect)
         except Exception as exc:
             messagebox.showerror('Unmask failed', str(exc))
             return

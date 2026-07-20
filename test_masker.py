@@ -83,6 +83,24 @@ class MaskerTests(unittest.TestCase):
         self.assertIn('where COL_', masked)
         self.assertEqual(sql, unmask_text(masked, mapping))
 
+    def test_unmasks_parameter_after_target_dialect_removes_at_sign(self):
+        mapping = {
+            'procedures': {'we_are_procs': 'PROC_1'},
+            'parameters': {
+                '@mail_merge_id': '@PARAM_3',
+                '@effectiveness': '@PARAM_2',
+            },
+        }
+        translated = '''create procedure PROC_1(
+            IN PARAM_3 integer, PARAM_2 numeric(3,2))
+        BEGIN SET PARAM_2 = 1; END;'''
+        restored = unmask_text(translated, mapping, dialect='postgresql')
+        self.assertIn('mail_merge_id integer', restored)
+        self.assertIn('effectiveness numeric', restored)
+        self.assertIn('SET effectiveness = 1', restored)
+        self.assertNotIn('@', restored)
+        self.assertNotIn('PARAM_', restored)
+
 
 if __name__ == '__main__':
     unittest.main()
