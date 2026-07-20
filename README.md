@@ -31,8 +31,8 @@ python masker.py unmask --input translated.sql --output restored.sql --mapping m
 
 If the masked SQL contains the embedded mapping comment, `--mapping` can be omitted.
 During unmasking, select the target dialect. Parameter placeholders are recognized
-with or without `@`/`:`; PostgreSQL restores bare parameter names, while Sybase ASA
-restores `@`-prefixed names.
+with or without `@`/`:`; PostgreSQL restores parameter names with a `p_` prefix,
+while Sybase ASA restores `@`-prefixed names.
 
 ## Example workflow
 

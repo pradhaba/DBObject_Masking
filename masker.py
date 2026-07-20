@@ -421,7 +421,7 @@ def parameter_name_for_dialect(original, dialect, placeholder_has_sigil):
     """Restore a parameter name using conventions of the target dialect."""
     bare_name = original.lstrip('@:')
     if dialect == 'postgresql':
-        return bare_name
+        return bare_name if bare_name.lower().startswith('p_') else f'p_{bare_name}'
     if dialect == 'sybase_asa':
         return original if original.startswith('@') else f'@{bare_name}'
     # Generic mode follows the placeholder form, allowing translated SQL that

@@ -95,11 +95,18 @@ class MaskerTests(unittest.TestCase):
             IN PARAM_3 integer, PARAM_2 numeric(3,2))
         BEGIN SET PARAM_2 = 1; END;'''
         restored = unmask_text(translated, mapping, dialect='postgresql')
-        self.assertIn('mail_merge_id integer', restored)
-        self.assertIn('effectiveness numeric', restored)
-        self.assertIn('SET effectiveness = 1', restored)
+        self.assertIn('p_mail_merge_id integer', restored)
+        self.assertIn('p_effectiveness numeric', restored)
+        self.assertIn('SET p_effectiveness = 1', restored)
         self.assertNotIn('@', restored)
         self.assertNotIn('PARAM_', restored)
+
+    def test_postgresql_does_not_duplicate_existing_p_prefix(self):
+        mapping = {'parameters': {'p_customer_id': 'PARAM_1'}}
+        self.assertEqual(
+            'SELECT p_customer_id;',
+            unmask_text('SELECT PARAM_1;', mapping, dialect='postgresql'),
+        )
 
 
 if __name__ == '__main__':
