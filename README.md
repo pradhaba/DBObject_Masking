@@ -4,7 +4,7 @@ This repository contains a small Python utility to mask SQL DDL object names and
 
 ## What it does
 
-- Parses DDL text to identify tables, views, procedures, functions, triggers, indexes, sequences, types, columns, routine parameters, and declared variables.
+- Parses DDL text to identify tables, views, procedures, functions, triggers, indexes, sequences, types, columns, routine parameters, and locally declared variables. Parameters and local variables are kept in separate mapping categories.
 - Replaces those names with generated masked tokens like `TBL_1`, `PROC_1`, and `COL_1`.
 - Outputs a masked DDL string plus a mapping file.
 - Can reverse the masked names back to original values using the mapping.

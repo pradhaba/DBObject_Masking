@@ -31,6 +31,7 @@ OBJECT_TYPE_PREFIX = {
     "type": "TYPE",
     "column": "COL",
     "parameter": "PARAM",
+    "variable": "VAR",
 }
 
 SUPPORTED_DIALECTS = ('generic', 'sybase_asa', 'postgresql')
@@ -233,7 +234,7 @@ def split_sql_list(text):
 
 
 def extract_parameter_names(text):
-    """Extract named routine parameters and locally declared variables."""
+    """Extract named parameters from procedure and function signatures."""
     parameters = set()
     for match in OBJECT_DEFINITION_PATTERN.finditer(text):
         if match.group('type').lower() not in ('procedure', 'proc', 'function'):
@@ -257,13 +258,19 @@ def extract_parameter_names(text):
             if param_match:
                 parameters.add(normalize_name(param_match.group('name')))
 
+    return parameters
+
+
+def extract_variable_names(text):
+    """Extract local variables declared inside routine bodies."""
+    variables = set()
     for match in re.finditer(
         rf'\bDECLARE\s+(?P<name>{IDENTIFIER})\s+(?P<type>{IDENTIFIER})',
         text,
         re.IGNORECASE,
     ):
-        parameters.add(normalize_name(match.group('name')))
-    return parameters
+        variables.add(normalize_name(match.group('name')))
+    return variables
 
 
 def extract_object_map(text, dialect='generic'):
@@ -278,6 +285,7 @@ def extract_object_map(text, dialect='generic'):
         "types": set(),
         "columns": set(),
         "parameters": set(),
+        "variables": set(),
     }
     if dialect == 'sybase_asa':
         text = text.replace('CREATE PROCEDURE', 'CREATE PROCEDURE')
@@ -315,13 +323,14 @@ def extract_object_map(text, dialect='generic'):
     object_map['tables'].update(query_tables)
     object_map['columns'].update(query_columns)
     object_map['parameters'].update(extract_parameter_names(text))
+    object_map['variables'].update(extract_variable_names(text))
     return object_map
 
 
 def build_mapping(object_map):
     mapping = {}
     counter = 1
-    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns', 'parameters'):
+    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns', 'parameters', 'variables'):
         mapping[object_type] = {}
         prefix = OBJECT_TYPE_PREFIX.get(object_type[:-1] if object_type.endswith('s') else object_type, 'OBJ')
         for original_name in sorted(object_map[object_type], key=lambda o: o.lower()):

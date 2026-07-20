@@ -49,7 +49,7 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual('GetFees_mapping.json', suggest_mapping_filename(procedure_first))
         self.assertEqual('Fee Levels_mapping.json', suggest_mapping_filename(table_first))
 
-    def test_masks_routine_parameters_and_declared_variables(self):
+    def test_keeps_routine_parameters_and_declared_variables_separate(self):
         sql = '''create procedure dba.we_are_procs(
             IN @mail_merge_id integer,
             @effectiveness numeric(3,2))
@@ -62,10 +62,12 @@ class MaskerTests(unittest.TestCase):
         self.assertNotIn('@effectiveness', masked)
         self.assertNotIn('@result', masked)
         self.assertIn('@PARAM_', masked)
+        self.assertIn('@VAR_', masked)
         self.assertEqual(
-            {'@mail_merge_id', '@effectiveness', '@result'},
+            {'@mail_merge_id', '@effectiveness'},
             set(mapping['parameters']),
         )
+        self.assertEqual({'@result'}, set(mapping['variables']))
         self.assertEqual(sql, unmask_text(masked, mapping))
 
     def test_masks_unqualified_update_columns(self):
