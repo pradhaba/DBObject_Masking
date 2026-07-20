@@ -30,6 +30,7 @@ OBJECT_TYPE_PREFIX = {
     "sequence": "SEQ",
     "type": "TYPE",
     "column": "COL",
+    "parameter": "PARAM",
 }
 
 SUPPORTED_DIALECTS = ('generic', 'sybase_asa', 'postgresql')
@@ -178,6 +179,60 @@ def extract_query_names(text):
     return tables, columns
 
 
+def split_sql_list(text):
+    """Split a comma-separated SQL list while respecting nested type brackets."""
+    parts = []
+    current = []
+    depth = 0
+    for ch in text:
+        if ch == '(':
+            depth += 1
+        elif ch == ')' and depth:
+            depth -= 1
+        if ch == ',' and depth == 0:
+            parts.append(''.join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append(''.join(current))
+    return parts
+
+
+def extract_parameter_names(text):
+    """Extract named routine parameters and locally declared variables."""
+    parameters = set()
+    for match in OBJECT_DEFINITION_PATTERN.finditer(text):
+        if match.group('type').lower() not in ('procedure', 'proc', 'function'):
+            continue
+        open_paren = text.find('(', match.end())
+        if open_paren == -1:
+            continue
+        # Do not consume a parenthesis belonging to the routine body.
+        between = text[match.end():open_paren]
+        if re.search(r'\b(?:AS|BEGIN)\b', between, re.IGNORECASE):
+            continue
+        close_paren = find_balanced_parentheses(text, open_paren)
+        if close_paren == -1:
+            continue
+        for declaration in split_sql_list(text[open_paren + 1:close_paren]):
+            param_match = re.match(
+                rf'\s*(?:(?:INOUT|IN|OUT)\s+)?(?P<name>{IDENTIFIER})\s+(?P<type>{IDENTIFIER})',
+                declaration,
+                re.IGNORECASE,
+            )
+            if param_match:
+                parameters.add(normalize_name(param_match.group('name')))
+
+    for match in re.finditer(
+        rf'\bDECLARE\s+(?P<name>{IDENTIFIER})\s+(?P<type>{IDENTIFIER})',
+        text,
+        re.IGNORECASE,
+    ):
+        parameters.add(normalize_name(match.group('name')))
+    return parameters
+
+
 def extract_object_map(text, dialect='generic'):
     object_map = {
         "tables": set(),
@@ -189,6 +244,7 @@ def extract_object_map(text, dialect='generic'):
         "sequences": set(),
         "types": set(),
         "columns": set(),
+        "parameters": set(),
     }
     if dialect == 'sybase_asa':
         text = text.replace('CREATE PROCEDURE', 'CREATE PROCEDURE')
@@ -225,17 +281,19 @@ def extract_object_map(text, dialect='generic'):
     query_tables, query_columns = extract_query_names(text)
     object_map['tables'].update(query_tables)
     object_map['columns'].update(query_columns)
+    object_map['parameters'].update(extract_parameter_names(text))
     return object_map
 
 
 def build_mapping(object_map):
     mapping = {}
     counter = 1
-    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns'):
+    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns', 'parameters'):
         mapping[object_type] = {}
         prefix = OBJECT_TYPE_PREFIX.get(object_type[:-1] if object_type.endswith('s') else object_type, 'OBJ')
         for original_name in sorted(object_map[object_type], key=lambda o: o.lower()):
-            mapping[object_type][original_name] = f"{prefix}_{counter}"
+            sigil = original_name[0] if original_name.startswith(('@', ':')) else ''
+            mapping[object_type][original_name] = f"{sigil}{prefix}_{counter}"
             counter += 1
     return mapping
 
@@ -291,7 +349,7 @@ def replace_identifiers(text, replacements):
         patterns = [
             rf'"{re.escape(original)}"',
             rf'\[{re.escape(original)}\]',
-            rf'\b{re.escape(original)}\b',
+            rf'(?<![\w#$@]){re.escape(original)}(?![\w#$@])',
         ]
         for pattern in patterns:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)

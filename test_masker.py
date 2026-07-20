@@ -49,6 +49,25 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual('GetFees_mapping.json', suggest_mapping_filename(procedure_first))
         self.assertEqual('Fee Levels_mapping.json', suggest_mapping_filename(table_first))
 
+    def test_masks_routine_parameters_and_declared_variables(self):
+        sql = '''create procedure dba.we_are_procs(
+            IN @mail_merge_id integer,
+            @effectiveness numeric(3,2))
+        BEGIN
+            DECLARE @result integer;
+            SET @result = @mail_merge_id;
+        END;'''
+        masked, mapping = mask_text(sql, dialect='sybase_asa', embed_mapping=False)
+        self.assertNotIn('@mail_merge_id', masked)
+        self.assertNotIn('@effectiveness', masked)
+        self.assertNotIn('@result', masked)
+        self.assertIn('@PARAM_', masked)
+        self.assertEqual(
+            {'@mail_merge_id', '@effectiveness', '@result'},
+            set(mapping['parameters']),
+        )
+        self.assertEqual(sql, unmask_text(masked, mapping))
+
 
 if __name__ == '__main__':
     unittest.main()
