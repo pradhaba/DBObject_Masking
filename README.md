@@ -59,4 +59,11 @@ Run the GUI with:
 python gui.py
 ```
 
-Then paste DDL into the left pane, choose mode and dialect, and press `Process`.
+Select a `.sql` file with **Browse SQL**, or paste/type DDL directly into the left
+input pane. Then choose the mode and dialect and press **Process**. Loading another
+file replaces the current input; **Clear input** resets both the editor and its
+selected-file path.
+
+For masking, choose **Save location** under Mapping path. The mapping is saved as
+`<object-name>_mapping.json`, using the first procedure or table declared in the
+DDL. Use **JSON file** to select an existing mapping when unmasking.

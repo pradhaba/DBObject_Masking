@@ -34,11 +34,16 @@ OBJECT_TYPE_PREFIX = {
 
 SUPPORTED_DIALECTS = ('generic', 'sybase_asa', 'postgresql')
 
-CREATE_OBJECT_PATTERN = re.compile(
-    r"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(TABLE|VIEW|INDEX|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE|TYPE)\s+"
-    r"(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?:(?:\"[^\"]+\"|\[[^\]]+\]|[\w]+)\s*\.)?"
-    r"(?P<name>\"[^\"]+\"|\[[^\]]+\]|[\w]+)",
+IDENTIFIER = r'(?:"(?:[^"]|"")+"|\[(?:[^\]]|\]\])+\]|[\w#$@]+)'
+QUALIFIED_IDENTIFIER = rf'{IDENTIFIER}(?:\s*\.\s*{IDENTIFIER})*'
+
+# DDL seen in real schema dumps includes ALTER statements, SQL Server/Sybase's
+# PROC abbreviation, and database.schema.object names.  The former expression
+# only understood CREATE and at most one qualifier.
+OBJECT_DEFINITION_PATTERN = re.compile(
+    rf"\b(?:CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?|ALTER\s+)"
+    rf"(?P<type>TABLE|VIEW|INDEX|FUNCTION|PROCEDURE|PROC|TRIGGER|SEQUENCE|TYPE)\s+"
+    rf"(?:IF\s+NOT\s+EXISTS\s+)?(?P<qualified_name>{QUALIFIED_IDENTIFIER})",
     re.IGNORECASE,
 )
 
@@ -55,6 +60,12 @@ def normalize_name(name):
     if not m:
         return name.strip()
     return m.group("dq") or m.group("br") or m.group("raw")
+
+
+def final_identifier(qualified_name):
+    """Return the object portion of a possibly qualified SQL name."""
+    parts = re.findall(IDENTIFIER, qualified_name)
+    return normalize_name(parts[-1]) if parts else normalize_name(qualified_name)
 
 
 def quote_name(name, quote_char='"'):
@@ -81,9 +92,9 @@ def find_balanced_parentheses(text, start_index):
 def extract_table_column_names(text):
     column_names = []
     for match in re.finditer(
-        r"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-        r"(?:(?:\"[^\"]+\"|\[[^\]]+\]|[\w]+)\s*\.)?"
-        r"(?P<name>\"[^\"]+\"|\[[^\]]+\]|[\w]+)",
+        rf"\bCREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?"
+        rf"(?:(?:GLOBAL|LOCAL)\s+TEMPORARY\s+|TEMP(?:ORARY)?\s+)?TABLE\s+"
+        rf"(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>{QUALIFIED_IDENTIFIER})",
         text,
         re.IGNORECASE,
     ):
@@ -123,6 +134,50 @@ def extract_table_column_names(text):
     return column_names
 
 
+def extract_query_names(text):
+    """Find relation names and qualified columns used inside SQL statements."""
+    tables = set()
+    columns = set()
+    qualifiers = set()
+
+    # Covers the common DML relation positions without mistaking the schema in
+    # a routine declaration for a table name.
+    relation_pattern = re.compile(
+        rf'\b(?:FROM|JOIN|UPDATE|INTO)\s+(?P<name>{QUALIFIED_IDENTIFIER})',
+        re.IGNORECASE,
+    )
+    for match in relation_pattern.finditer(text):
+        table_name = final_identifier(match.group('name'))
+        if table_name:
+            tables.add(table_name)
+            qualifiers.add(table_name.lower())
+
+        # Record a simple table alias, if present. SQL clause words are not
+        # aliases and must not make arbitrary qualified expressions eligible.
+        tail = text[match.end():]
+        alias_match = re.match(
+            rf'\s+(?:AS\s+)?(?P<alias>{IDENTIFIER})', tail, re.IGNORECASE
+        )
+        if alias_match:
+            alias = final_identifier(alias_match.group('alias'))
+            if alias.upper() not in {
+                'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'FULL', 'INNER', 'OUTER',
+                'CROSS', 'ON', 'GROUP', 'ORDER', 'HAVING', 'UNION', 'END',
+            }:
+                qualifiers.add(alias.lower())
+
+    qualified_column_pattern = re.compile(
+        rf'(?P<qualifier>{IDENTIFIER})\s*\.\s*(?P<column>{IDENTIFIER})',
+        re.IGNORECASE,
+    )
+    for match in qualified_column_pattern.finditer(text):
+        qualifier = normalize_name(match.group('qualifier'))
+        if qualifier.lower() in qualifiers:
+            columns.add(normalize_name(match.group('column')))
+
+    return tables, columns
+
+
 def extract_object_map(text, dialect='generic'):
     object_map = {
         "tables": set(),
@@ -141,9 +196,11 @@ def extract_object_map(text, dialect='generic'):
     elif dialect == 'postgresql':
         text = text.replace('CREATE OR REPLACE FUNCTION', 'CREATE OR REPLACE FUNCTION')
         text = text.replace('CREATE OR REPLACE PROCEDURE', 'CREATE OR REPLACE PROCEDURE')
-    for match in CREATE_OBJECT_PATTERN.finditer(text):
-        object_type = match.group(1).lower()
-        name = normalize_name(match.group('name'))
+    for match in OBJECT_DEFINITION_PATTERN.finditer(text):
+        object_type = match.group('type').lower()
+        if object_type == 'proc':
+            object_type = 'procedure'
+        name = final_identifier(match.group('qualified_name'))
         if not name:
             continue
         if object_type == 'table':
@@ -165,6 +222,9 @@ def extract_object_map(text, dialect='generic'):
     column_names = extract_table_column_names(text)
     for c in column_names:
         object_map['columns'].add(c)
+    query_tables, query_columns = extract_query_names(text)
+    object_map['tables'].update(query_tables)
+    object_map['columns'].update(query_columns)
     return object_map
 
 
@@ -178,6 +238,21 @@ def build_mapping(object_map):
             mapping[object_type][original_name] = f"{prefix}_{counter}"
             counter += 1
     return mapping
+
+
+def suggest_mapping_filename(text):
+    """Build a mapping filename from the first procedure or table declaration."""
+    for match in OBJECT_DEFINITION_PATTERN.finditer(text):
+        object_type = match.group('type').lower()
+        if object_type not in ('table', 'procedure', 'proc'):
+            continue
+        name = final_identifier(match.group('qualified_name'))
+        # Keep the original identifier recognizable while producing a filename
+        # that is valid on Windows and other common platforms.
+        safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name).strip(' .')
+        if safe_name:
+            return f'{safe_name}_mapping.json'
+    return 'ddl_mapping.json'
 
 
 def mapping_to_text(mapping):
