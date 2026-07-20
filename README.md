@@ -70,3 +70,7 @@ selected-file path.
 For masking, choose **Save location** under Mapping path. The mapping is saved as
 `<object-name>_mapping.json`, using the first procedure or table declared in the
 DDL. Use **JSON file** to select an existing mapping when unmasking.
+
+The GUI displays input DDL, output DDL, and mapping JSON in separate panes. Use
+**Copy output** or **Copy mapping** to place either result on the clipboard.
+Embedded mapping is optional and disabled by default so output DDL remains clean.

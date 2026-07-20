@@ -66,7 +66,7 @@ def save_mapping_file(mapping, mapping_path_var, ddl_text):
     return path
 
 
-def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_text, target_text):
+def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_text, target_text, mapping_text):
     ddl_text = source_text.get('1.0', tk.END).strip()
     if not ddl_text:
         messagebox.showwarning('DDL Masker', 'Please select a SQL file or paste DDL text in the input pane.')
@@ -82,10 +82,8 @@ def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_te
             return
         if mapping_path is None:
             return
-        target_text.config(state='normal')
-        target_text.delete('1.0', tk.END)
-        target_text.insert(tk.END, masked_text)
-        target_text.config(state='disabled')
+        set_readonly_text(target_text, masked_text)
+        set_readonly_text(mapping_text, json.dumps(mapping, indent=2, sort_keys=True))
         messagebox.showinfo('DDL Masker', f'Masking complete.\nMapping saved to:\n{mapping_path}')
     else:
         mapping = None
@@ -106,10 +104,8 @@ def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_te
         except Exception as exc:
             messagebox.showerror('Unmask failed', str(exc))
             return
-        target_text.config(state='normal')
-        target_text.delete('1.0', tk.END)
-        target_text.insert(tk.END, unmasked)
-        target_text.config(state='disabled')
+        set_readonly_text(target_text, unmasked)
+        set_readonly_text(mapping_text, json.dumps(mapping, indent=2, sort_keys=True))
         messagebox.showinfo('DDL Masker', 'Unmasking complete.')
 
 
@@ -132,14 +128,14 @@ def show_mapping_text(source_text):
 def build_gui():
     root = tk.Tk()
     root.title('DDL Masker GUI')
-    root.geometry('1100x700')
+    root.geometry('1350x700')
 
     control_frame = ttk.Frame(root, padding='10')
     control_frame.pack(fill=tk.X)
 
     mode_var = tk.StringVar(value='mask')
     dialect_var = tk.StringVar(value='generic')
-    embed_var = tk.BooleanVar(value=True)
+    embed_var = tk.BooleanVar(value=False)
     sql_path_var = tk.StringVar()
     mapping_path_var = tk.StringVar()
 
@@ -173,24 +169,30 @@ def build_gui():
     button_frame = ttk.Frame(root, padding='10')
     button_frame.pack(fill=tk.X)
 
-    ttk.Button(button_frame, text='Process', command=lambda: process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_text, target_text)).pack(side=tk.LEFT)
+    ttk.Button(button_frame, text='Process', command=lambda: process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_text, target_text, mapping_text)).pack(side=tk.LEFT)
+    ttk.Button(button_frame, text='Copy output', command=lambda: copy_to_clipboard(target_text, 'Output DDL')).pack(side=tk.LEFT, padx=(10, 0))
+    ttk.Button(button_frame, text='Copy mapping', command=lambda: copy_to_clipboard(mapping_text, 'Mapping JSON')).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Show embedded mapping', command=lambda: show_mapping_text(source_text)).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Clear input', command=lambda: clear_input(source_text, sql_path_var)).pack(side=tk.LEFT, padx=(10, 0))
-    ttk.Button(button_frame, text='Clear output', command=lambda: clear_text(target_text)).pack(side=tk.LEFT, padx=(10, 0))
+    ttk.Button(button_frame, text='Clear output', command=lambda: clear_results(target_text, mapping_text)).pack(side=tk.LEFT, padx=(10, 0))
 
     pane = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
     pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     source_frame = ttk.Labelframe(pane, text='Input DDL')
     target_frame = ttk.Labelframe(pane, text='Output DDL')
+    mapping_frame = ttk.Labelframe(pane, text='Mapping JSON')
 
     source_text = scrolledtext.ScrolledText(source_frame, wrap=tk.WORD)
     source_text.pack(fill=tk.BOTH, expand=True)
     target_text = scrolledtext.ScrolledText(target_frame, wrap=tk.WORD, state='disabled')
     target_text.pack(fill=tk.BOTH, expand=True)
+    mapping_text = scrolledtext.ScrolledText(mapping_frame, wrap=tk.NONE, state='disabled', width=35)
+    mapping_text.pack(fill=tk.BOTH, expand=True)
 
     pane.add(source_frame, weight=1)
     pane.add(target_frame, weight=1)
+    pane.add(mapping_frame, weight=1)
 
     return root
 
@@ -199,6 +201,29 @@ def clear_text(target_text):
     target_text.config(state='normal')
     target_text.delete('1.0', tk.END)
     target_text.config(state='disabled')
+
+
+def set_readonly_text(text_widget, value):
+    text_widget.config(state='normal')
+    text_widget.delete('1.0', tk.END)
+    text_widget.insert('1.0', value)
+    text_widget.config(state='disabled')
+
+
+def clear_results(target_text, mapping_text):
+    clear_text(target_text)
+    clear_text(mapping_text)
+
+
+def copy_to_clipboard(text_widget, label):
+    value = text_widget.get('1.0', tk.END).rstrip('\n')
+    if not value:
+        messagebox.showwarning('DDL Masker', f'{label} is empty.')
+        return
+    text_widget.clipboard_clear()
+    text_widget.clipboard_append(value)
+    text_widget.update_idletasks()
+    messagebox.showinfo('DDL Masker', f'{label} copied to clipboard.')
 
 
 def clear_input(source_text, sql_path_var):
