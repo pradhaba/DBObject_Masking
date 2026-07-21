@@ -150,7 +150,11 @@ def extract_query_names(text):
     )
     for match in relation_pattern.finditer(text):
         table_name = final_identifier(match.group('name'))
-        if table_name:
+        # In Sybase ASA, SELECT ... INTO @variable uses INTO for an assignment
+        # target rather than a relation.  Parameter/local-variable sigils can
+        # never identify a table, so leave those names to the routine-variable
+        # extractors.
+        if table_name and not table_name.startswith(('@', ':')):
             tables.add(table_name)
             qualifiers.add(table_name.lower())
 
@@ -265,11 +269,13 @@ def extract_variable_names(text):
     """Extract local variables declared inside routine bodies."""
     variables = set()
     for match in re.finditer(
-        rf'\bDECLARE\s+(?P<name>{IDENTIFIER})\s+(?P<type>{IDENTIFIER})',
+        rf'\bDECLARE\s+(?P<names>{IDENTIFIER}(?:\s*,\s*{IDENTIFIER})*)\s+'
+        rf'(?P<type>{IDENTIFIER})',
         text,
         re.IGNORECASE,
     ):
-        variables.add(normalize_name(match.group('name')))
+        for name in split_sql_list(match.group('names')):
+            variables.add(normalize_name(name))
     return variables
 
 

@@ -70,6 +70,34 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual({'@result'}, set(mapping['variables']))
         self.assertEqual(sql, unmask_text(masked, mapping))
 
+    def test_masks_sybase_select_into_and_multi_name_declare_as_variables(self):
+        sql = '''CREATE PROCEDURE dba.sp_asa_migration_test
+        (
+            IN @member_id INTEGER,
+            IN @ai_right INTEGER,
+            IN @user_id INTEGER,
+        )
+        BEGIN
+        DECLARE @res log varchar;
+        DECLARE @alias_id, @member_type integer;
+        select min("users_aliases"."alias_id")
+        into @alias_id
+        from "dba"."users_aliases"
+        where "users_aliases"."user_id" = @user_id;
+        END;'''
+        masked, mapping = mask_text(sql, dialect='sybase_asa', embed_mapping=False)
+
+        self.assertEqual(
+            {'@alias_id', '@member_type', '@res'},
+            set(mapping['variables']),
+        )
+        self.assertNotIn('@alias_id', mapping['tables'])
+        self.assertNotIn('@member_type', masked)
+        self.assertRegex(masked, r'into\s+@VAR_\d+')
+        restored = unmask_text(masked, mapping)
+        self.assertIn('into @alias_id', restored)
+        self.assertIn('DECLARE @alias_id, @member_type integer', restored)
+
     def test_masks_unqualified_update_columns(self):
         sql = '''update "DNA".fee_levels
         set effectiveness = @PARAM_3
