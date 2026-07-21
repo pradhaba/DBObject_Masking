@@ -444,6 +444,17 @@ def parameter_name_for_dialect(original, dialect, placeholder_has_sigil):
     return original if placeholder_has_sigil else bare_name
 
 
+def variable_name_for_dialect(original, dialect, placeholder_has_sigil):
+    """Restore a local-variable name using target-dialect conventions."""
+    bare_name = original.lstrip('@:')
+    if dialect == 'postgresql':
+        # Keep locals distinct from parameters and columns in PL/pgSQL.
+        return bare_name if bare_name.startswith('_') else f'_{bare_name}'
+    if dialect == 'sybase_asa':
+        return original if original.startswith('@') else f'@{bare_name}'
+    return original if placeholder_has_sigil else bare_name
+
+
 def unmask_text(text, mapping, dialect='generic'):
     if mapping is None:
         raise ValueError('No mapping provided for unmasking.')
@@ -458,6 +469,16 @@ def unmask_text(text, mapping, dialect='generic'):
                 # Translators commonly remove @ when converting Sybase/SQL
                 # Server routines to PostgreSQL. Accept that token as well.
                 reverse_replacements[bare_masked] = parameter_name_for_dialect(
+                    original, dialect, False
+                )
+            elif object_type == 'variables':
+                bare_masked = masked.lstrip('@:')
+                reverse_replacements[masked] = variable_name_for_dialect(
+                    original, dialect, masked.startswith(('@', ':'))
+                )
+                # As with parameters, cross-dialect translators remove the
+                # Sybase @ sigil (for example, @VAR_12 becomes var_12).
+                reverse_replacements[bare_masked] = variable_name_for_dialect(
                     original, dialect, False
                 )
             else:

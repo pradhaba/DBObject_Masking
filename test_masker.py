@@ -138,6 +138,30 @@ class MaskerTests(unittest.TestCase):
             unmask_text('SELECT PARAM_1;', mapping, dialect='postgresql'),
         )
 
+    def test_unmasks_bare_sybase_variables_in_postgresql_translation(self):
+        mapping = {
+            'variables': {
+                '@alias_id': '@VAR_12',
+                '@member_type': '@VAR_13',
+                '@res': '@VAR_14',
+            },
+        }
+        translated = '''DECLARE
+            var_14 VARCHAR;
+            var_12 INTEGER;
+            var_13 INTEGER;
+        BEGIN
+            SELECT MIN(alias_id) INTO var_12;
+        END;'''
+
+        restored = unmask_text(translated, mapping, dialect='postgresql')
+
+        self.assertIn('_res VARCHAR', restored)
+        self.assertIn('_alias_id INTEGER', restored)
+        self.assertIn('_member_type INTEGER', restored)
+        self.assertIn('INTO _alias_id', restored)
+        self.assertNotRegex(restored, r'(?i)\bvar_\d+\b')
+
 
 if __name__ == '__main__':
     unittest.main()
