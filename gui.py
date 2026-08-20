@@ -14,7 +14,7 @@ from masker import (
     unmask_text,
 )
 
-SUPPORTED_DIALECTS = ['generic', 'sybase_asa', 'postgresql']
+SUPPORTED_DIALECTS = ['generic', 'sybase_asa', 'postgresql', 'MySQL', 'Oracle', 'MSSQL']
 
 
 def select_sql_file(sql_path_var, source_text):
