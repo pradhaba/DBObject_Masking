@@ -149,7 +149,7 @@ class Launcher:
                 ttk.Label(edit,text=tip,foreground="#666").grid(row=row*2+1,column=1,sticky=tk.W)
             category_row=len(field_specs)*2
             ttk.Label(edit,text="Category").grid(row=category_row,column=0,sticky=tk.W,pady=6)
-            categories=("datatypes","date_time","null_handling","string_functions","numeric_functions","conditional_control_flow","parameters_variables","transactions","error_handling","cursors","dynamic_sql","procedure_structure","schema_qualification","custom")
+            categories=("datatypes","date_time","null_handling","string_functions","numeric_functions","conditional_control_flow","parameters_variables","transactions","error_handling","cursors","dynamic_sql","procedure_structure","schema_qualification","table_aliasing","custom")
             ttk.Combobox(edit,textvariable=category,values=categories,state="readonly",width=28).grid(row=category_row,column=1,sticky=tk.W)
             ttk.Label(edit,text="Groups related rules for filtering, review, and approval.",foreground="#666").grid(row=category_row+1,column=1,sticky=tk.W)
             ttk.Label(edit,text="Risk level").grid(row=category_row+2,column=0,sticky=tk.W,pady=6)

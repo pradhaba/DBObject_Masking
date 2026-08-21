@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 
 from database import get_active_skill_version
 from masker import mask_text, unmask_text
@@ -43,12 +44,24 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
 
 def _apply_rules_with_trace(masked_text: str, rules: list[dict], mapping, source_dialect: str, target_dialect: str):
     """Apply deterministic rules line by line and retain a complete audit trace."""
+    alias_rule = next((rule for rule in rules if rule["rule_code"] == "asa-pg-table-aliases"), None)
+    original_lines = masked_text.splitlines()
+    if alias_rule is not None:
+        masked_text, _ = _apply_table_alias_policy(masked_text, alias_rule["replacement"], mapping)
     output_lines = []
     trace = []
     for line_number, original_line in enumerate(masked_text.splitlines(), start=1):
         current = original_line
         applied = []
+        source_line = original_lines[line_number - 1] if line_number <= len(original_lines) else ""
+        if alias_rule is not None and source_line != original_line:
+            applied.append({
+                "rule_id": alias_rule["id"], "rule_code": alias_rule["rule_code"],
+                "priority": alias_rule["priority"], "matches": 1,
+            })
         for rule in rules:
+            if rule["rule_code"] == "asa-pg-table-aliases":
+                continue
             if rule["rule_code"] == "asa-pg-schema-qualification":
                 changed, count = _qualify_schema_references(current, rule["replacement"])
             else:
@@ -62,11 +75,71 @@ def _apply_rules_with_trace(masked_text: str, rules: list[dict], mapping, source
         output_lines.append(current)
         trace.append({
             "line": line_number,
-            "source": unmask_text(original_line, mapping, source_dialect),
+            "source": unmask_text(source_line, mapping, source_dialect),
             "output": unmask_text(current, mapping, target_dialect),
             "rules": applied,
         })
     return "\n".join(output_lines), trace
+
+
+def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str, int]:
+    """Add aliases to FROM/JOIN tables and rewrite matching table.column qualifiers.
+
+    The rule replacement is JSON so each client can supply explicit aliases while
+    retaining a deterministic, collision-safe fallback for other tables.
+    """
+    try:
+        policy = json.loads(policy_json or "{}")
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("The table-alias skill replacement must be valid JSON.") from exc
+    alias_length = max(1, int(policy.get("alias_length", 3)))
+    overrides = {str(k).lower(): str(v) for k, v in policy.get("aliases", {}).items()}
+    reverse_tables = {token.lower(): name for name, token in mapping.get("tables", {}).items()}
+    used: set[str] = set()
+    aliases: dict[str, str] = {}
+    changes = 0
+    reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET)"
+    relation = re.compile(
+        rf"(?P<prefix>\b(?:FROM|JOIN)\s+)(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))"
+        rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)[A-Za-z_]\w*))?",
+        re.IGNORECASE,
+    )
+
+    def unique_alias(base: str) -> str:
+        candidate = re.sub(r"\W+", "_", base).strip("_") or "tbl"
+        if candidate[0].isdigit():
+            candidate = f"t_{candidate}"
+        root = candidate
+        suffix = 2
+        while candidate.lower() in used:
+            candidate = f"{root}{suffix}"
+            suffix += 1
+        used.add(candidate.lower())
+        return candidate
+
+    def add_alias(match):
+        nonlocal changes
+        token = match.group("table").strip('"')
+        token_key = token.lower()
+        existing = match.group("alias")
+        if token_key in aliases:
+            return match.group(0)
+        if existing:
+            aliases[token_key] = unique_alias(existing)
+            return match.group(0)
+        original = reverse_tables.get(token_key, token)
+        configured = overrides.get(original.lower())
+        alias = unique_alias(configured or original[:alias_length].lower())
+        aliases[token_key] = alias
+        changes += 1
+        return f"{match.group('prefix')}{match.group('relation')} AS {alias}"
+
+    sql = relation.sub(add_alias, sql)
+    for token, alias in aliases.items():
+        qualifier = re.compile(rf"(?<![\w.])\"?{re.escape(token)}\"?\s*\.", re.IGNORECASE)
+        sql, replaced = qualifier.subn(f"{alias}.", sql)
+        changes += replaced
+    return sql, changes
 
 
 def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:
@@ -82,14 +155,16 @@ def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:
     builtins = {
         "abs","avg","cast","ceil","ceiling","coalesce","count","current_date","current_time",
         "current_timestamp","date_part","extract","greatest","length","lower","max","min","mod",
-        "nullif","octet_length","position","round","substring","sum","trim","upper",
+        "nullif","octet_length","position","round","substring","sum","trim","upper","len","string",
         "dba","if","in","values","varchar","char","text","integer","numeric","timestamp","boolean",
+        "and","or","not","then","else","elsif","elseif","case","when","result","returns","table",
+        "begin","end","select","where","exists","as","on","language","function","procedure",
     }
     routine = re.compile(r"(?<![\w.\"'])(?P<name>[A-Za-z_][A-Za-z0-9_$]*)\s*(?=\()")
     def qualify_call(match):
         nonlocal count
         name = match.group("name")
-        if name.lower() in builtins:
+        if name.lower() in builtins or "_" not in name:
             return match.group(0)
         count += 1
         return f"{schema}.{name}"

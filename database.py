@@ -200,6 +200,8 @@ def connect(path: Path = DATABASE_PATH) -> sqlite3.Connection:
     _seed_postgresql_type_revision(connection)
     _seed_global_variable_rule(connection)
     _seed_schema_qualification_rule(connection)
+    _seed_builtin_function_rules(connection)
+    _seed_table_alias_rule(connection)
     return connection
 
 
@@ -600,6 +602,126 @@ def _seed_schema_qualification_rule(connection) -> None:
          "Qualify unqualified table names and internal routine calls with the approved PostgreSQL schema.",
          "SELECT wa_someone_get_it(report_code) FROM tablename1 a JOIN tablename2 b",
          "SELECT dba.wa_someone_get_it(report_code) FROM dba.tablename1 a JOIN dba.tablename2 b"),
+    )
+    connection.commit()
+
+
+def _seed_builtin_function_rules(connection) -> None:
+    """Add STRING and LEN conversions without treating them as schema routines."""
+    skill = connection.execute(
+        "SELECT id FROM migration_skills WHERE source_dialect='sybase_asa' AND target_dialect='postgresql'"
+    ).fetchone()
+    if skill is None:
+        return
+    existing = connection.execute(
+        """SELECT 1 FROM skill_versions sv JOIN skill_rules sr ON sr.skill_version_id=sv.id
+        WHERE sv.skill_id=? AND sr.rule_code='asa-pg-string-concat'
+        AND sv.status IN ('awaiting_approval','active') LIMIT 1""", (skill["id"],)
+    ).fetchone()
+    if existing:
+        return
+    candidate = connection.execute(
+        "SELECT * FROM skill_versions WHERE skill_id=? AND status='awaiting_approval' ORDER BY version DESC LIMIT 1",
+        (skill["id"],),
+    ).fetchone()
+    if candidate is None:
+        base = connection.execute(
+            "SELECT * FROM skill_versions WHERE skill_id=? AND status='active' ORDER BY version DESC LIMIT 1",
+            (skill["id"],),
+        ).fetchone()
+        if base is None:
+            return
+        next_version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM skill_versions WHERE skill_id=?", (skill["id"],)).fetchone()[0]
+        cursor = connection.execute(
+            """INSERT INTO skill_versions(skill_id,version,status,instructions,created_at,created_by)
+            VALUES (?,?,'awaiting_approval',?,?,'system-builtin-revision')""",
+            (skill["id"], next_version, base["instructions"], now()),
+        )
+        candidate_id = cursor.lastrowid
+        connection.execute(
+            """INSERT INTO skill_rules(skill_version_id,rule_code,priority,pattern,replacement,enabled,
+            description,source_example,target_example,risk_level,category,review_status,review_notes,is_custom)
+            SELECT ?,rule_code,priority,pattern,replacement,enabled,description,source_example,target_example,
+            risk_level,category,review_status,review_notes,is_custom FROM skill_rules WHERE skill_version_id=?""",
+            (candidate_id, base["id"]),
+        )
+        candidate = {"id": candidate_id}
+    rules = [
+        ("asa-pg-string-concat", 175, r"\bSTRING\s*\(", "CONCAT(",
+         "Convert the ASA STRING concatenation function to PostgreSQL CONCAT.",
+         "STRING('REPORT_', mode_id)", "CONCAT('REPORT_', mode_id)", "medium"),
+        ("asa-pg-len", 176, r"\bLEN\s*\(", "LENGTH(",
+         "Convert the ASA LEN function to PostgreSQL LENGTH.", "LEN(value)", "LENGTH(value)", "low"),
+    ]
+    connection.executemany(
+        """INSERT INTO skill_rules(skill_version_id,rule_code,priority,pattern,replacement,description,
+        source_example,target_example,risk_level,category,review_status)
+        VALUES (?,?,?,?,?,?,?,?,?,'string_functions','awaiting_approval')""",
+        [(candidate["id"], *rule) for rule in rules],
+    )
+    connection.execute(
+        """UPDATE skill_rules SET pattern=?,description=?,review_status='awaiting_approval',
+        review_notes='Routine qualification narrowed to custom names containing an underscore.'
+        WHERE skill_version_id=? AND rule_code='asa-pg-schema-qualification'""",
+        (r"\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\b|\b[A-Za-z_]\w*_[A-Za-z0-9_]*\s*\(",
+         "Qualify table references and custom internal routine names containing an underscore; never qualify SQL keywords or built-ins.",
+         candidate["id"]),
+    )
+    connection.commit()
+
+
+def _seed_table_alias_rule(connection) -> None:
+    """Add a client-configurable, reviewable table-alias policy."""
+    skill = connection.execute(
+        "SELECT id FROM migration_skills WHERE source_dialect='sybase_asa' AND target_dialect='postgresql'"
+    ).fetchone()
+    if skill is None:
+        return
+    existing = connection.execute(
+        """SELECT 1 FROM skill_versions sv JOIN skill_rules sr ON sr.skill_version_id=sv.id
+        WHERE sv.skill_id=? AND sr.rule_code='asa-pg-table-aliases'
+        AND sv.status IN ('awaiting_approval','active') LIMIT 1""", (skill["id"],)
+    ).fetchone()
+    if existing:
+        return
+    candidate = connection.execute(
+        "SELECT * FROM skill_versions WHERE skill_id=? AND status='awaiting_approval' ORDER BY version DESC LIMIT 1",
+        (skill["id"],),
+    ).fetchone()
+    if candidate is None:
+        base = connection.execute(
+            "SELECT * FROM skill_versions WHERE skill_id=? AND status='active' ORDER BY version DESC LIMIT 1",
+            (skill["id"],),
+        ).fetchone()
+        if base is None:
+            return
+        version = connection.execute(
+            "SELECT COALESCE(MAX(version),0)+1 FROM skill_versions WHERE skill_id=?", (skill["id"],)
+        ).fetchone()[0]
+        cursor = connection.execute(
+            """INSERT INTO skill_versions(skill_id,version,status,instructions,created_at,created_by)
+            VALUES (?,?,'awaiting_approval',?,?,'system-table-alias-revision')""",
+            (skill["id"], version, base["instructions"], now()),
+        )
+        candidate_id = cursor.lastrowid
+        connection.execute(
+            """INSERT INTO skill_rules(skill_version_id,rule_code,priority,pattern,replacement,enabled,
+            description,source_example,target_example,risk_level,category,review_status,review_notes,is_custom)
+            SELECT ?,rule_code,priority,pattern,replacement,enabled,description,source_example,target_example,
+            risk_level,category,review_status,review_notes,is_custom FROM skill_rules WHERE skill_version_id=?""",
+            (candidate_id, base["id"]),
+        )
+    else:
+        candidate_id = candidate["id"]
+    policy = json.dumps({"alias_length": 3, "aliases": {"report_items": "ret"}}, separators=(",", ":"))
+    connection.execute(
+        """INSERT INTO skill_rules(skill_version_id,rule_code,priority,pattern,replacement,description,
+        source_example,target_example,risk_level,category,review_status)
+        VALUES (?,'asa-pg-table-aliases',910,?,?,?,?,?,'medium','table_aliasing','awaiting_approval')""",
+        (candidate_id, "FROM/JOIN table references and table.column qualifiers", policy,
+         "Add PostgreSQL table aliases and replace source table-name column qualifiers. Replacement is editable JSON: alias_length controls fallback names; aliases stores client-specific overrides.",
+         "SELECT report_items.id FROM dba.report_items",
+         "SELECT ret.id FROM dba.report_items AS ret"),
     )
     connection.commit()
 

@@ -116,6 +116,33 @@ END''')
         unchanged, count = _qualify_schema_references('SELECT count(*) FROM dba.tablename1', 'dba')
         self.assertEqual(unchanged, 'SELECT count(*) FROM dba.tablename1')
         self.assertEqual(count, 0)
+        keywords = "RETURNS TABLE (x int) WHEN 'PRICE_LIST' THEN (CASE WHEN STRING('x') = 'x' AND (LEN(x) > 0) THEN 1 END)"
+        unchanged, count = _qualify_schema_references(keywords, 'dba')
+        self.assertEqual(unchanged, keywords)
+        self.assertEqual(count, 0)
+
+    def test_table_alias_policy_rewrites_table_qualifiers(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = "SELECT TBL_1.COL_1, TBL_2.COL_2 FROM dba.TBL_1 JOIN dba.TBL_2 ON TBL_1.COL_3 = TBL_2.COL_3"
+        mapping = {"tables": {"report_items": "TBL_1", "reports": "TBL_2"}}
+        policy = '{"alias_length":3,"aliases":{"report_items":"ret"}}'
+        migrated, count = _apply_table_alias_policy(masked, policy, mapping)
+        self.assertIn("ret.COL_1", migrated)
+        self.assertIn("rep.COL_2", migrated)
+        self.assertIn("FROM dba.TBL_1 AS ret", migrated)
+        self.assertIn("JOIN dba.TBL_2 AS rep", migrated)
+        self.assertIn("ON ret.COL_3 = rep.COL_3", migrated)
+        self.assertEqual(count, 6)
+
+    def test_table_alias_policy_preserves_existing_alias_and_avoids_collisions(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = "SELECT TBL_1.COL_1, TBL_2.COL_2 FROM TBL_1 AS x JOIN TBL_2 ON TBL_1.COL_3=TBL_2.COL_3"
+        mapping = {"tables": {"report_one": "TBL_1", "report_two": "TBL_2"}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn("FROM TBL_1 AS x", migrated)
+        self.assertIn("JOIN TBL_2 AS rep", migrated)
+        self.assertIn("x.COL_1", migrated)
+        self.assertIn("rep.COL_2", migrated)
 
     def test_masks_qualified_table_and_columns(self):
         sql = 'CREATE TABLE db.dbo.Customer (CustomerId int, "Display Name" varchar(50));'
