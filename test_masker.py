@@ -4,6 +4,119 @@ from masker import mask_text, suggest_mapping_filename, unmask_text
 
 
 class MaskerTests(unittest.TestCase):
+    def test_masking_prefixes_are_loaded_from_database(self):
+        from database import get_masking_rules
+        rules = {rule['object_type']: rule['token_prefix'] for rule in get_masking_rules()}
+        masked, mapping = mask_text('CREATE TABLE Customer (id int);', embed_mapping=False)
+        self.assertEqual(mapping['tables']['Customer'].split('_')[0], rules['table'])
+
+    def test_database_backed_migration_skill_preserves_names(self):
+        import tempfile
+        from pathlib import Path
+        from database import approve_skill_version, get_skill_version_rules, list_skill_versions, review_skill_rule
+        from migration_engine import migrate_text
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'skills.sqlite3'
+            candidate = next(v for v in list_skill_versions(path) if v['source_dialect']=='sybase_asa' and v['target_dialect']=='postgresql' and v['status']=='awaiting_approval')
+            for rule in get_skill_version_rules(candidate['id'], path):
+                review_skill_rule(rule['id'], 'approved', 'test approval', path)
+            approve_skill_version(candidate['id'], 'test approver', path)
+            migrated, mapping, skill = migrate_text(
+                'CREATE PROCEDURE Customer() BEGIN SELECT GETDATE(); END',
+                'sybase_asa', 'postgresql', path,
+            )
+        self.assertIn('Customer', migrated)
+        self.assertIn('CURRENT_TIMESTAMP', migrated)
+        self.assertIn('CREATE OR REPLACE FUNCTION', migrated)
+        self.assertEqual(skill['source_dialect'], 'sybase_asa')
+        self.assertIn('Customer', mapping['procedures'])
+
+    def test_asa_skill_rejects_non_procedure_objects(self):
+        from migration_engine import migrate_text
+        with self.assertRaisesRegex(ValueError, 'procedures only'):
+            migrate_text('CREATE TABLE Customer (id int);', 'sybase_asa', 'postgresql')
+
+    def test_postgresql_routine_classification(self):
+        from migration_engine import classify_postgresql_routine
+        self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p() BEGIN COMMIT; END')[0], 'procedure')
+        self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p(OUT result integer) BEGIN END')[0], 'procedure')
+        self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p() BEGIN SELECT value FROM t; END')[0], 'function')
+
+    def test_result_clause_keeps_nested_datatype_parentheses(self):
+        import tempfile
+        from pathlib import Path
+        from database import approve_skill_version, get_skill_version_rules, list_skill_versions, review_skill_rule
+        from migration_engine import migrate_text
+        sql = '''CREATE PROCEDURE dba.p()
+RESULT (
+    mailmerge_set_id int,
+    mailmerge_set_name varchar(50),
+    mailmerge_category_id int,
+    date_column_name varchar(50)
+)
+BEGIN
+    SELECT 1, 'a', 2, 'b';
+END;'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'skills.sqlite3'
+            candidate = next(v for v in list_skill_versions(path) if v['source_dialect']=='sybase_asa' and v['target_dialect']=='postgresql' and v['status']=='awaiting_approval')
+            for rule in get_skill_version_rules(candidate['id'], path):
+                review_skill_rule(rule['id'], 'approved', 'test', path)
+            approve_skill_version(candidate['id'], 'tester', path)
+            migrated, _, _ = migrate_text(sql, 'sybase_asa', 'postgresql', path)
+        self.assertIn('RETURNS TABLE (mailmerge_set_id int,', migrated)
+        self.assertIn('mailmerge_set_name varchar(50),', migrated)
+        self.assertIn('mailmerge_category_id int,', migrated)
+        self.assertIn('date_column_name varchar(50))', migrated)
+        self.assertIn('LANGUAGE sql', migrated)
+        self.assertNotIn('RETURN QUERY SELECT 1', migrated)
+        self.assertNotIn('\n,\n    mailmerge_category_id', migrated)
+
+    def test_nested_select_in_where_is_not_return_query(self):
+        from migration_engine import _convert_top_level_result_selects
+        body = '''BEGIN
+    SELECT id FROM parent
+    WHERE 0 < (
+        SELECT count(*)
+        FROM child
+        WHERE child.parent_id = parent.id
+    );
+END'''
+        converted = _convert_top_level_result_selects(body)
+        self.assertIn('RETURN QUERY SELECT id FROM parent', converted)
+        self.assertIn('\n        SELECT count(*)', converted)
+        self.assertNotIn('RETURN QUERY SELECT count(*)', converted)
+
+    def test_language_sql_requires_one_simple_select(self):
+        from migration_engine import _simple_select_body
+        self.assertIsNotNone(_simple_select_body('BEGIN\nSELECT id FROM customer;\nEND;'))
+        self.assertIsNone(_simple_select_body('BEGIN\nIF x = 1 THEN\nSELECT id FROM customer;\nEND IF;\nEND;'))
+        self.assertIsNone(_simple_select_body('BEGIN\nSELECT id INTO target FROM customer;\nUPDATE audit SET used = 1;\nEND;'))
+
+    def test_plpgsql_declarations_and_set_assignments_are_normalized(self):
+        from migration_engine import _normalize_plpgsql_body
+        declarations, body = _normalize_plpgsql_body('''BEGIN
+    DECLARE _li_user_id INTEGER;
+    SET
+    _li_user_id = dba.get_int_var('gi_user_id');
+END''')
+        self.assertEqual(declarations.strip(), '_li_user_id INTEGER;')
+        self.assertNotIn('DECLARE _li_user_id', body)
+        self.assertNotIn('\n    SET\n', body)
+        self.assertIn("_li_user_id := dba.get_int_var('gi_user_id');", body)
+
+    def test_schema_qualification_handles_tables_and_internal_calls(self):
+        from migration_engine import _qualify_schema_references
+        source = 'SELECT wa_someone_get_it(report_code) FROM tablename1 AS a JOIN tablename2 AS b ON a.id=b.id'
+        migrated, count = _qualify_schema_references(source, 'dba')
+        self.assertIn('dba.wa_someone_get_it(report_code)', migrated)
+        self.assertIn('FROM dba.tablename1 AS a', migrated)
+        self.assertIn('JOIN dba.tablename2 AS b', migrated)
+        self.assertEqual(count, 3)
+        unchanged, count = _qualify_schema_references('SELECT count(*) FROM dba.tablename1', 'dba')
+        self.assertEqual(unchanged, 'SELECT count(*) FROM dba.tablename1')
+        self.assertEqual(count, 0)
+
     def test_masks_qualified_table_and_columns(self):
         sql = 'CREATE TABLE db.dbo.Customer (CustomerId int, "Display Name" varchar(50));'
         masked, mapping = mask_text(sql, embed_mapping=False)

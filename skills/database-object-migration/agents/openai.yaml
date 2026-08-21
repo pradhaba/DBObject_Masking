@@ -1,0 +1,4 @@
+interface:
+  display_name: "Database Object Migration"
+  short_description: "Apply database-backed dialect migration skills"
+  default_prompt: "Use $database-object-migration to migrate this database object between the selected dialects."
