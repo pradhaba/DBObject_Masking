@@ -25,11 +25,45 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
     dialect = target_dialect if selected_action == 'unmask' else source_dialect
     if selected_action == 'migrate' and project is not None:
         from migration_engine import migrate_text
+        metadata_connection = None
         try:
-            migrated_text, mapping, skill = migrate_text(ddl_text, source_dialect, target_dialect, target_override=target_routine_var.get())
+            if target_dialect == 'postgresql':
+                password = getattr(project, 'target_password', None)
+                if password is None:
+                    host = simpledialog.askstring('PostgreSQL metadata', 'Target hostname:', initialvalue=project.target_host or 'localhost')
+                    if host is None:return
+                    database_name = simpledialog.askstring('PostgreSQL metadata', 'Target database name:', initialvalue=project.target_database_name or 'postgres')
+                    if database_name is None:return
+                    username = simpledialog.askstring('PostgreSQL metadata', 'Target username:', initialvalue=project.target_username)
+                    if username is None:return
+                    password = simpledialog.askstring('PostgreSQL metadata', 'Target password:', show='*')
+                    if password is None:return
+                    project.target_host=host.strip(); project.target_database_name=database_name.strip(); project.target_username=username.strip()
+                    from workflow import load_projects, save_projects
+                    projects = load_projects()
+                    for index, saved_project in enumerate(projects):
+                        if saved_project.id == project.id:
+                            projects[index] = project
+                            break
+                    save_projects(projects)
+                    project.target_password = password
+                import psycopg
+                metadata_connection = psycopg.connect(
+                    host=project.target_host, port=project.target_port,
+                    dbname=project.target_database_name, user=project.target_username,
+                    password=password, connect_timeout=5,
+                )
+            migrated_text, mapping, skill = migrate_text(
+                ddl_text, source_dialect, target_dialect,
+                target_override=target_routine_var.get(),
+                metadata_connection=metadata_connection,
+            )
         except Exception as exc:
             messagebox.showerror('Migration failed', str(exc))
             return
+        finally:
+            if metadata_connection is not None:
+                metadata_connection.close()
         set_readonly_text(target_text, migrated_text)
         set_readonly_text(mapping_text, json.dumps(mapping, indent=2, sort_keys=True))
         set_readonly_text(skill_text, format_skill_trace(skill))
