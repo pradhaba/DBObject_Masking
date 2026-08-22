@@ -100,7 +100,7 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
     changes = 0
     reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET)"
     relation = re.compile(
-        rf"(?P<prefix>\b(?:FROM|JOIN)\s+)(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))"
+        rf"(?P<prefix>(?:\b(?:FROM|JOIN)\s+|,\s*))(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))(?!\s*\.)"
         rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)[A-Za-z_]\w*))?",
         re.IGNORECASE,
     )
@@ -139,7 +139,91 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
         qualifier = re.compile(rf"(?<![\w.])\"?{re.escape(token)}\"?\s*\.", re.IGNORECASE)
         sql, replaced = qualifier.subn(f"{alias}.", sql)
         changes += replaced
+    sql, join_changes = _convert_comma_tables_to_joins(sql)
+    changes += join_changes
     return sql, changes
+
+
+def _split_top_level(text: str, delimiter_pattern: str) -> list[str]:
+    """Split SQL text on a delimiter while ignoring strings and parentheses."""
+    parts = []
+    start = 0
+    depth = 0
+    quote = None
+    index = 0
+    delimiter = re.compile(delimiter_pattern, re.IGNORECASE)
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            match = delimiter.match(text, index)
+            if match:
+                parts.append(text[start:index].strip())
+                start = match.end()
+                index = match.end()
+                continue
+        index += 1
+    parts.append(text[start:].strip())
+    return [part for part in parts if part]
+
+
+def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
+    """Turn comma FROM lists into JOIN clauses using relationship predicates."""
+    statement = re.compile(
+        r'(?P<from>\bFROM\s+)(?P<relations>.*?)(?P<where>\bWHERE\s+)(?P<conditions>.*?)(?P<tail>;|\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|\bUNION\b|\bRETURNING\b|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def convert(match):
+        relations = _split_top_level(match.group('relations'), r',')
+        if len(relations) < 2 or any(re.search(r'\bJOIN\b', item, re.IGNORECASE) for item in relations):
+            return match.group(0)
+        predicates = _split_top_level(match.group('conditions'), r'\bAND\b')
+        alias_pattern = re.compile(r'(?:\bAS\s+|\s+)([A-Za-z_]\w*)\s*$', re.IGNORECASE)
+        relation_aliases = []
+        for relation_text in relations:
+            alias_match = alias_pattern.search(relation_text)
+            if not alias_match:
+                return match.group(0)
+            relation_aliases.append(alias_match.group(1))
+
+        remaining = list(predicates)
+        joined = [relation_aliases[0]]
+        join_lines = [relations[0]]
+        for relation_text, alias in zip(relations[1:], relation_aliases[1:]):
+            current_ref = re.compile(rf'(?<!\w){re.escape(alias)}\s*\.', re.IGNORECASE)
+            prior_ref = re.compile(rf'(?<!\w)(?:{"|".join(re.escape(item) for item in joined)})\s*\.', re.IGNORECASE)
+            predicate_index = next(
+                (i for i, predicate in enumerate(remaining) if current_ref.search(predicate) and prior_ref.search(predicate)),
+                None,
+            )
+            if predicate_index is None:
+                join_lines.append(f'CROSS JOIN {relation_text}')
+            else:
+                predicate = remaining.pop(predicate_index)
+                join_lines.append(f'JOIN {relation_text} ON {predicate}')
+            joined.append(alias)
+
+        where_sql = ''
+        if remaining:
+            where_sql = f"\n{match.group('where')}{'\nAND '.join(remaining)}"
+        return f"{match.group('from')}{chr(10).join(join_lines)}{where_sql}{match.group('tail')}"
+
+    converted, count = statement.subn(convert, sql)
+    return converted, count
 
 
 def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:

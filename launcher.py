@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from workflow import (
-    SUPPORTED_DATABASES, WORKSPACE_DIR, create_project, dialect_for,
+    SUPPORTED_DATABASES, WORKSPACE_DIR, clear_project_files, create_project, dialect_for,
     import_sql_files, list_project_files, load_projects, safe_extract_sql_archive, save_projects,
     test_database_connection,
 )
@@ -311,8 +311,15 @@ class Launcher:
             except Exception as exc: messagebox.showerror("Import failed",str(exc)); return
             if not files:return
             self.project.archive_path=";".join(chosen); self.project.workspace=str(workspace); self.project.input_type="files"; save_projects(self.projects); record_upload(self.project, list_project_files(self.project)); self.show_files()
+        def clear_files():
+            if not list_project_files(self.project):return
+            if not messagebox.askyesno("Clear project files", "Remove all imported file copies from this project?\n\nThe original source files will not be deleted."):return
+            try: clear_project_files(self.project)
+            except Exception as exc: messagebox.showerror("Clear failed",str(exc)); return
+            self.project.archive_path=""; self.project.workspace=""; self.project.input_type=""; save_projects(self.projects); record_upload(self.project, []); self.show_files()
         ttk.Button(archive_bar,text="Upload archive",command=upload).pack(side=tk.LEFT,padx=(8,0))
         ttk.Button(archive_bar,text="Add file(s)",command=add_files).pack(side=tk.LEFT,padx=(8,0))
+        ttk.Button(archive_bar,text="Clear project files",command=clear_files).pack(side=tk.LEFT,padx=(8,0))
         files=list_project_files(self.project)
         list_frame=ttk.Frame(self.container); list_frame.pack(fill=tk.BOTH,expand=True,pady=18)
         canvas=tk.Canvas(list_frame,highlightthickness=0); scroll=ttk.Scrollbar(list_frame,orient=tk.VERTICAL,command=canvas.yview)

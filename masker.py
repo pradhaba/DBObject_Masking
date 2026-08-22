@@ -158,6 +158,29 @@ def extract_query_names(text):
             }:
                 qualifiers.add(alias.lower())
 
+    # SQL Anywhere procedures commonly use legacy comma-separated FROM lists,
+    # often with one relation per line.  Only the first relation is preceded by
+    # FROM, so discover each subsequent relation inside the same FROM clause.
+    from_clause_pattern = re.compile(
+        r'\bFROM\b(?P<body>.*?)(?=\bWHERE\b|\bGROUP\s+BY\b|\bORDER\s+BY\b|'
+        r'\bHAVING\b|\bUNION\b|\bRETURNING\b|;|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    comma_relation_pattern = re.compile(
+        rf',\s*(?P<name>{QUALIFIED_IDENTIFIER})'
+        rf'(?:\s+(?:AS\s+)?(?P<alias>{IDENTIFIER}))?',
+        re.IGNORECASE,
+    )
+    for clause in from_clause_pattern.finditer(text):
+        for match in comma_relation_pattern.finditer(clause.group('body')):
+            table_name = final_identifier(match.group('name'))
+            if table_name and not table_name.startswith(('@', ':')):
+                tables.add(table_name)
+                qualifiers.add(table_name.lower())
+            alias_name = match.group('alias')
+            if alias_name:
+                qualifiers.add(final_identifier(alias_name).lower())
+
     qualified_column_pattern = re.compile(
         rf'(?P<qualifier>{IDENTIFIER})\s*\.\s*(?P<column>{IDENTIFIER})',
         re.IGNORECASE,

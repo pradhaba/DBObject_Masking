@@ -144,6 +144,64 @@ END''')
         self.assertIn("x.COL_1", migrated)
         self.assertIn("rep.COL_2", migrated)
 
+    def test_table_alias_policy_handles_comma_separated_tables(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = (
+            "SELECT TBL_1.COL_1, TBL_2.COL_2 "
+            "FROM dba.TBL_1, dba.TBL_2 "
+            "WHERE TBL_1.COL_3 = TBL_2.COL_3"
+        )
+        mapping = {"tables": {"report_items": "TBL_1", "reports": "TBL_2"}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn("FROM dba.TBL_1 AS rep", migrated)
+        self.assertIn("JOIN dba.TBL_2 AS rep2 ON rep.COL_3 = rep2.COL_3", migrated)
+        self.assertIn("rep.COL_1", migrated)
+        self.assertIn("rep2.COL_2", migrated)
+
+    def test_masks_every_table_in_multiline_comma_from_list(self):
+        sql = '''SELECT reports.report_id, actions.action_id
+    FROM
+    dba."reports",
+    dba."actions",
+    dba."table_1",
+    dba."table_2"
+    WHERE reports.report_id = actions.report_id'''
+        masked, mapping = mask_text(sql, 'sybase_asa', embed_mapping=False)
+        self.assertEqual(
+            set(mapping['tables']),
+            {'reports', 'actions', 'table_1', 'table_2'},
+        )
+        self.assertIn('dba.TBL_1', masked)
+        self.assertIn('dba.TBL_2', masked)
+        self.assertIn('dba.TBL_3', masked)
+        self.assertIn('dba.TBL_4', masked)
+
+    def test_comma_tables_become_joins_using_where_relationships(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = '''SELECT TBL_1.COL_1
+FROM
+dba.TBL_1,
+dba.TBL_2,
+dba.TBL_3
+WHERE
+CONCAT('REPORT_', TBL_1.COL_2) = TBL_2.COL_3
+AND TBL_2.COL_4 = TBL_3.COL_4
+AND TBL_1.COL_5 = 'Y';'''
+        mapping = {'tables': {'reports': 'TBL_1', 'actions': 'TBL_2', 'details': 'TBL_3'}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn('FROM\ndba.TBL_1 AS rep', migrated)
+        self.assertIn("JOIN dba.TBL_2 AS act ON CONCAT('REPORT_', rep.COL_2) = act.COL_3", migrated)
+        self.assertIn('JOIN dba.TBL_3 AS det ON act.COL_4 = det.COL_4', migrated)
+        self.assertIn("WHERE\nrep.COL_5 = 'Y'", migrated)
+        self.assertNotIn('dba.TBL_1 AS rep,', migrated)
+
+    def test_comma_table_without_relationship_becomes_cross_join(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = "SELECT * FROM TBL_1, TBL_2 WHERE TBL_1.COL_1 = 'Y'"
+        mapping = {'tables': {'reports': 'TBL_1', 'actions': 'TBL_2'}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn('CROSS JOIN TBL_2 AS act', migrated)
+
     def test_masks_qualified_table_and_columns(self):
         sql = 'CREATE TABLE db.dbo.Customer (CustomerId int, "Display Name" varchar(50));'
         masked, mapping = mask_text(sql, embed_mapping=False)

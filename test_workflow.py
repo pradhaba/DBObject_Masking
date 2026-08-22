@@ -2,7 +2,7 @@ import unittest
 import tarfile
 import zipfile
 
-from workflow import Project, dialect_for, load_projects, safe_extract_sql_archive, save_projects
+from workflow import Project, clear_project_files, dialect_for, load_projects, safe_extract_sql_archive, save_projects
 
 
 class WorkflowTests(unittest.TestCase):
@@ -35,6 +35,27 @@ class WorkflowTests(unittest.TestCase):
             bundle.writestr('notes.md', 'ignore')
         files = safe_extract_sql_archive(archive, self.root / 'out')
         self.assertEqual([p.name for p in files], ['table.sql'])
+
+    def test_clear_project_files_removes_only_imported_copies(self):
+        source = self.root / 'source.sql'
+        source.write_text('select 1')
+        workspace_root = self.root / 'workspaces'
+        workspace = workspace_root / 'p-clear'
+        workspace.mkdir(parents=True)
+        imported = workspace / source.name
+        imported.write_text(source.read_text())
+        project = Project('p-clear', 'Clear files', 'SAP ASA', 'PostgreSQL', 'host', 2638, 'db', 'user', 'now', workspace=str(workspace))
+        clear_project_files(project, workspace_root)
+        self.assertTrue(source.exists())
+        self.assertFalse(workspace.exists())
+
+    def test_clear_project_files_rejects_unrelated_directory(self):
+        unrelated = self.root / 'unrelated'
+        unrelated.mkdir()
+        project = Project('p-clear', 'Clear files', 'SAP ASA', 'PostgreSQL', 'host', 2638, 'db', 'user', 'now', workspace=str(unrelated))
+        with self.assertRaisesRegex(ValueError, 'outside'):
+            clear_project_files(project, self.root / 'workspaces')
+        self.assertTrue(unrelated.exists())
 
     def test_rejects_zip_slip(self):
         archive = self.root / 'unsafe.zip'

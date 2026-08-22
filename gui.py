@@ -11,64 +11,8 @@ from masker import (
     unmask_text,
 )
 
-<<<<<<< HEAD
-SUPPORTED_DIALECTS = ['generic', 'sybase_asa', 'postgresql', 'MySQL', 'Oracle', 'MSSQL']
-
-
-def select_sql_file(sql_path_var, source_text):
-    file_path = filedialog.askopenfilename(
-        title='Select SQL file',
-        filetypes=[('SQL files', '*.sql'), ('Text files', '*.txt'), ('All files', '*.*')],
-    )
-    if not file_path:
-        return
-    try:
-        with open(file_path, 'r', encoding='utf-8-sig') as sql_file:
-            ddl_text = sql_file.read()
-    except (OSError, UnicodeError) as exc:
-        messagebox.showerror('Loading SQL failed', str(exc))
-        return
-
-    sql_path_var.set(file_path)
-    source_text.delete('1.0', tk.END)
-    source_text.insert('1.0', ddl_text)
-
-
-def select_mapping_file(mapping_path_var):
-    file_path = filedialog.askopenfilename(
-        title='Select mapping JSON file',
-        filetypes=[('JSON files', '*.json'), ('All files', '*.*')],
-    )
-    if file_path:
-        mapping_path_var.set(file_path)
-
-
-def select_mapping_location(mapping_path_var):
-    directory = filedialog.askdirectory(title='Select mapping save location')
-    if directory:
-        mapping_path_var.set(directory)
-
-
-def save_mapping_file(mapping, mapping_path_var, ddl_text):
-    path = mapping_path_var.get().strip()
-    if not path:
-        directory = filedialog.askdirectory(title='Select mapping save location')
-        if not directory:
-            return None
-        path = directory
-    if os.path.isdir(path):
-        path = os.path.join(path, suggest_mapping_filename(ddl_text))
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(mapping, f, indent=2, sort_keys=True)
-    mapping_path_var.set(path)
-    return path
-
-
-def process_action(mode_var, dialect_var, embed_var, mapping_path_var, source_text, target_text, mapping_text):
-=======
 def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, source_text, target_text, mapping_text,
                    skill_text, target_routine_var, project=None, object_path_var=None, workflow_action=None, run_context=None):
->>>>>>> 8230d46acbc34fe9f9da10c8dcc9c443f5d47f9c
     ddl_text = source_text.get('1.0', tk.END).strip()
     if not ddl_text:
         messagebox.showwarning('DDL Masker', 'Please select a SQL file or paste DDL text in the input pane.')

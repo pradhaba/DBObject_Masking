@@ -126,6 +126,16 @@ def list_project_files(project: Project) -> list[Path]:
     )
 
 
+def clear_project_files(project: Project, workspace_dir: Path = WORKSPACE_DIR) -> None:
+    """Remove imported copies for one project without touching their source files."""
+    expected = (Path(workspace_dir) / project.id).resolve()
+    workspace = Path(project.workspace).resolve() if project.workspace else expected
+    if workspace != expected:
+        raise ValueError("Refusing to clear files outside this project's workspace.")
+    if workspace.exists():
+        shutil.rmtree(workspace)
+
+
 def dialect_for(database: str) -> str:
     return {
         "PostgreSQL": "postgresql", "Oracle": "oracle", "SQL Server": "sqlserver",
