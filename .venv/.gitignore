@@ -1,2 +1,6 @@
 .venv
+<<<<<<< Updated upstream
 *.cfg
+=======
+*.cfg
+>>>>>>> Stashed changes

@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV 'c:\Users\Bapuji Pradhan\Documents\projects\DBO_Masking\DBObject_Masking\.venv'
+set -gx VIRTUAL_ENV 'c:\Users\DeLL\Documents\DBO_Masking\DBObject_Masking\.venv'
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"Scripts $PATH
