@@ -64,10 +64,10 @@ END;'''
                 review_skill_rule(rule['id'], 'approved', 'test', path)
             approve_skill_version(candidate['id'], 'tester', path)
             migrated, _, _ = migrate_text(sql, 'sybase_asa', 'postgresql', path)
-        self.assertIn('RETURNS TABLE (mailmerge_set_id int,', migrated)
+        self.assertIn('RETURNS TABLE (\n    mailmerge_set_id int,', migrated)
         self.assertIn('mailmerge_set_name varchar(50),', migrated)
         self.assertIn('mailmerge_category_id int,', migrated)
-        self.assertIn('date_column_name varchar(50))', migrated)
+        self.assertIn('date_column_name varchar(50)\n)', migrated)
         self.assertIn('LANGUAGE sql', migrated)
         self.assertNotIn('RETURN QUERY SELECT 1', migrated)
         self.assertNotIn('\n,\n    mailmerge_category_id', migrated)
@@ -189,7 +189,7 @@ AND TBL_2.COL_4 = TBL_3.COL_4
 AND TBL_1.COL_5 = 'Y';'''
         mapping = {'tables': {'reports': 'TBL_1', 'actions': 'TBL_2', 'details': 'TBL_3'}}
         migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
-        self.assertIn('FROM\ndba.TBL_1 AS rep', migrated)
+        self.assertIn('FROM dba.TBL_1 AS rep', migrated)
         self.assertIn("JOIN dba.TBL_2 AS act ON CONCAT('REPORT_', rep.COL_2) = act.COL_3", migrated)
         self.assertIn('JOIN dba.TBL_3 AS det ON act.COL_4 = det.COL_4', migrated)
         self.assertIn("WHERE\nrep.COL_5 = 'Y'", migrated)
@@ -201,6 +201,136 @@ AND TBL_1.COL_5 = 'Y';'''
         mapping = {'tables': {'reports': 'TBL_1', 'actions': 'TBL_2'}}
         migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
         self.assertIn('CROSS JOIN TBL_2 AS act', migrated)
+
+    def test_parenthesized_where_relationships_become_joins(self):
+        from migration_engine import _convert_comma_tables_to_joins
+        sql = '''FROM
+treat AS tre,
+patients AS pat,
+staff AS sta,
+procedures AS pro,
+wtlist_r AS wtl
+WHERE
+((pro.item_id = tre.item_id)
+AND (pat.patient_id = tre.patient_id)
+AND (sta.member_id = tre.provider_id)
+AND (tre.account_id IS NULL))'''
+        migrated, count = _convert_comma_tables_to_joins(sql)
+        self.assertEqual(count, 1)
+        self.assertIn('JOIN patients AS pat ON pat.patient_id = tre.patient_id', migrated)
+        self.assertIn('JOIN staff AS sta ON sta.member_id = tre.provider_id', migrated)
+        self.assertIn('JOIN procedures AS pro ON pro.item_id = tre.item_id', migrated)
+        self.assertIn('CROSS JOIN wtlist_r AS wtl', migrated)
+        self.assertIn('WHERE\ntre.account_id IS NULL', migrated)
+
+    def test_multiple_selects_and_nested_subqueries_convert_independently(self):
+        from migration_engine import _convert_comma_tables_to_joins
+        sql = '''IF PARAM_1 = 999 THEN
+SELECT (SELECT TBL_2.COL_1 FROM TBL_2 WHERE TBL_2.COL_2 = TBL_1.COL_2)
+FROM TBL_5 AS t5, TBL_1 AS t1, TBL_4 AS t4
+WHERE ((t1.COL_3 = t5.COL_3) AND (t4.COL_4 = t5.COL_4) AND (t5.COL_5 IS NULL))
+ELSE
+SELECT (SELECT TBL_2.COL_1 FROM TBL_2 WHERE TBL_2.COL_2 = TBL_1.COL_2)
+FROM TBL_5 AS t5, TBL_1 AS t1, TBL_3 AS t3
+WHERE ((t1.COL_3 = t5.COL_3) AND (t3.COL_6 = t5.COL_6) AND (t5.COL_5 IS NULL));
+END IF;'''
+        migrated, count = _convert_comma_tables_to_joins(sql)
+        self.assertEqual(count, 2)
+        self.assertEqual(migrated.count('JOIN TBL_1 AS t1 ON'), 2)
+        self.assertIn('JOIN TBL_4 AS t4 ON t4.COL_4 = t5.COL_4', migrated)
+        self.assertIn('JOIN TBL_3 AS t3 ON t3.COL_6 = t5.COL_6', migrated)
+        self.assertEqual(migrated.count('FROM TBL_2 WHERE'), 2)
+        self.assertEqual(migrated.count('WHERE\nt5.COL_5 IS NULL'), 2)
+
+    def test_aliases_are_reused_in_each_select_scope_before_join_conversion(self):
+        from migration_engine import _apply_table_alias_policy
+        sql = '''IF PARAM_1 = 999 THEN
+SELECT (SELECT head.COL_1 FROM TBL_1 AS head WHERE head.COL_2 = head.COL_2)
+FROM TBL_5, TBL_1, TBL_4, TBL_3
+WHERE ((TBL_3.COL_3 = TBL_5.COL_3) AND (head.COL_4 = TBL_5.COL_4) AND (TBL_4.COL_5 = TBL_5.COL_5))
+ELSE
+SELECT head.COL_1
+FROM TBL_5, TBL_1, TBL_4, TBL_3
+WHERE ((TBL_3.COL_3 = TBL_5.COL_3) AND (head.COL_4 = TBL_5.COL_4) AND (TBL_4.COL_5 = TBL_5.COL_5));
+END IF;'''
+        mapping = {'tables': {
+            'treat': 'TBL_5', 'patients': 'TBL_1',
+            'staff': 'TBL_4', 'procedures': 'TBL_3',
+        }}
+        migrated, _ = _apply_table_alias_policy(sql, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertEqual(migrated.count('FROM TBL_5 AS tre'), 2)
+        self.assertEqual(migrated.count('JOIN TBL_1 AS head ON'), 2)
+        self.assertEqual(migrated.count('JOIN TBL_4 AS sta ON'), 2)
+        self.assertEqual(migrated.count('JOIN TBL_3 AS pro ON'), 2)
+
+    def test_already_masked_procedure_is_not_masked_again(self):
+        from migration_engine import _identity_mapping, _is_already_masked
+        sql = '''CREATE PROCEDURE dba.PROC_7(IN PARAM_35 INTEGER)
+        BEGIN SELECT TBL_1.COL_28, TBL_5.COL_32
+        FROM TBL_5, TBL_1
+        WHERE TBL_1.COL_19 = TBL_5.COL_19; END;'''
+        self.assertTrue(_is_already_masked(sql))
+        mapping = _identity_mapping(sql)
+        self.assertEqual(mapping['tables']['TBL_1'], 'TBL_1')
+        self.assertEqual(mapping['columns']['COL_32'], 'COL_32')
+        self.assertNotIn('parameters', mapping)
+
+    def test_multiline_asa_if_expression_becomes_case(self):
+        from migration_engine import _convert_asa_if_expressions
+        source = '''IF head.COL_10 = head.COL_19 THEN
+head.COL_28
+ELSE
+(SELECT head.COL_28 FROM TBL_1 AS head WHERE head.COL_10 = head.COL_19)
+ENDIF AS head_surname'''
+        converted = _convert_asa_if_expressions(source)
+        self.assertIn('CASE WHEN head.COL_10 = head.COL_19 THEN head.COL_28 ELSE', converted)
+        self.assertIn('END AS head_surname', converted)
+        self.assertNotRegex(converted.lower(), r'\bendif\b')
+
+    def test_result_select_branches_are_aligned_by_output_name(self):
+        from result_metadata import align_result_selects
+        source = '''BEGIN
+        IF x = 1 THEN
+          SELECT t.first_name, t.identifier AS item_id FROM TBL_1 t;
+        ELSE
+          SELECT t.identifier AS item_id, t.first_name FROM TBL_1 t;
+        END IF;
+        END;'''
+        aligned = align_result_selects(source)
+        second = aligned.lower().rfind('select')
+        self.assertLess(
+            aligned.lower().find('t.first_name', second),
+            aligned.lower().find('t.identifier as item_id', second),
+        )
+
+    def test_renderer_uses_inferred_returns_table_contract(self):
+        from migration_engine import render_postgresql_routine
+        source = 'CREATE PROCEDURE dba.PROC_1() BEGIN SELECT TBL_1.COL_1 FROM TBL_1; END;'
+        rendered, _, _ = render_postgresql_routine(source, 'function', 'COL_1 integer')
+        self.assertIn('RETURNS TABLE (\n    COL_1 integer\n)', rendered)
+        self.assertNotIn('RETURNS SETOF RECORD', rendered)
+
+    def test_grouped_filters_and_scalar_subquery_do_not_become_join_conditions(self):
+        from migration_engine import _convert_comma_tables_to_joins
+        sql = '''FROM TBL_5 AS tre, TBL_1 AS head, TBL_4 AS sta, TBL_3 AS pro, TBL_6 AS wtl
+WHERE ((pro.COL_14 = tre.COL_14)
+AND (head.COL_19 = tre.COL_19)
+AND (head.COL_26 IS NULL)
+AND (sta.COL_16 = tre.COL_25)
+AND (tre.COL_8 IS NULL))
+AND (PARAM_34 = (SELECT sta.COL_24 FROM TBL_4 AS sta WHERE sta.COL_16 = tre.COL_25) OR PARAM_34 = 0)
+AND sta.COL_16 = wtl.COL_12
+AND wtl.COL_27 = 0
+ELSE'''
+        migrated, count = _convert_comma_tables_to_joins(sql)
+        self.assertEqual(count, 1)
+        self.assertIn('JOIN TBL_1 AS head ON head.COL_19 = tre.COL_19', migrated)
+        self.assertIn('JOIN TBL_4 AS sta ON sta.COL_16 = tre.COL_25', migrated)
+        self.assertIn('JOIN TBL_3 AS pro ON pro.COL_14 = tre.COL_14', migrated)
+        self.assertIn('JOIN TBL_6 AS wtl ON sta.COL_16 = wtl.COL_12', migrated)
+        self.assertIn('PARAM_34 = (SELECT sta.COL_24 FROM TBL_4 AS sta WHERE', migrated)
+        self.assertIn('head.COL_26 IS NULL', migrated)
+        self.assertIn('wtl.COL_27 = 0;\nELSE', migrated)
 
     def test_masks_qualified_table_and_columns(self):
         sql = 'CREATE TABLE db.dbo.Customer (CustomerId int, "Display Name" varchar(50));'

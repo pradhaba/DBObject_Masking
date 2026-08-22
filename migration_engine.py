@@ -9,7 +9,8 @@ from database import get_active_skill_version
 from masker import mask_text, unmask_text
 
 
-def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None, target_override="auto"):
+def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
+                 target_override="auto", metadata_connection=None):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     if source_dialect == "sybase_asa" and not re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\b", text, re.IGNORECASE):
         raise ValueError("The active SAP ASA skill currently supports procedures only.")
@@ -19,12 +20,25 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         skill = get_active_skill_version(source_dialect, target_dialect, database_path)
     if skill is None:
         raise ValueError(f"No active approved migration skill for {source_dialect} → {target_dialect}.")
-    masked, mapping = mask_text(text, source_dialect, embed_mapping=False)
+    working_text = text
+    if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        from result_metadata import align_result_selects
+        working_text = align_result_selects(working_text)
+    if _is_already_masked(working_text):
+        masked, mapping = working_text, _identity_mapping(working_text)
+    else:
+        masked, mapping = mask_text(working_text, source_dialect, embed_mapping=False)
     migrated, trace = _apply_rules_with_trace(masked, skill["rules"], mapping, source_dialect, target_dialect)
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
+    inferred_result_columns = None
+    if target_type == "function" and target_dialect == "postgresql" and metadata_connection is not None:
+        from result_metadata import infer_returns_table
+        inferred_result_columns = infer_returns_table(working_text, metadata_connection)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
-        migrated, renderer_trace, routine_language = render_postgresql_routine(migrated, target_type)
+        migrated, renderer_trace, routine_language = render_postgresql_routine(
+            migrated, target_type, inferred_result_columns
+        )
         trace.extend(renderer_trace)
     else:
         routine_language = None
@@ -40,6 +54,36 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["routine_language"] = routine_language
     skill["trace"] = trace
     return restored, mapping, skill
+
+
+def _is_already_masked(text: str) -> bool:
+    """Recognize standalone masked DDL so it is not masked a second time."""
+    declared = re.search(
+        r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROC(?:EDURE)?|FUNCTION)\s+'
+        r'(?:"?[A-Za-z_]\w*"?\.)?"?(?:PROC|FUNC)_\d+"?',
+        text,
+        re.IGNORECASE,
+    )
+    return bool(
+        declared
+        and len(re.findall(r'\bTBL_\d+\b', text, re.IGNORECASE)) >= 1
+        and len(re.findall(r'\bCOL_\d+\b', text, re.IGNORECASE)) >= 1
+    )
+
+
+def _identity_mapping(text: str) -> dict:
+    """Supply token metadata while preserving names in an already-masked file."""
+    categories = {
+        'tables': 'TBL', 'views': 'VW', 'procedures': 'PROC', 'functions': 'FUNC',
+        'triggers': 'TRG', 'indexes': 'IDX', 'sequences': 'SEQ', 'types': 'TYPE',
+        'columns': 'COL',
+    }
+    mapping = {}
+    for category, prefix in categories.items():
+        tokens = sorted(set(re.findall(rf'\b{prefix}_\d+\b', text, re.IGNORECASE)), key=str.lower)
+        if tokens:
+            mapping[category] = {token: token for token in tokens}
+    return mapping
 
 
 def _apply_rules_with_trace(masked_text: str, rules: list[dict], mapping, source_dialect: str, target_dialect: str):
@@ -119,20 +163,28 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
 
     def add_alias(match):
         nonlocal changes
+        prefix = re.sub(r'\s+$', ' ', match.group('prefix'))
         token = match.group("table").strip('"')
         token_key = token.lower()
         existing = match.group("alias")
         if token_key in aliases:
-            return match.group(0)
+            if existing:
+                return f"{prefix}{match.group('relation')}{match.group('alias_part')}"
+            # A table token can occur in several SELECT statements or nested
+            # subqueries. Reuse its established alias in every query scope;
+            # otherwise later FROM lists contain unaliased relations and cannot
+            # be converted to JOIN clauses.
+            changes += 1
+            return f"{prefix}{match.group('relation')} AS {aliases[token_key]}"
         if existing:
             aliases[token_key] = unique_alias(existing)
-            return match.group(0)
+            return f"{prefix}{match.group('relation')}{match.group('alias_part')}"
         original = reverse_tables.get(token_key, token)
         configured = overrides.get(original.lower())
         alias = unique_alias(configured or original[:alias_length].lower())
         aliases[token_key] = alias
         changes += 1
-        return f"{match.group('prefix')}{match.group('relation')} AS {alias}"
+        return f"{prefix}{match.group('relation')} AS {alias}"
 
     sql = relation.sub(add_alias, sql)
     for token, alias in aliases.items():
@@ -180,34 +232,176 @@ def _split_top_level(text: str, delimiter_pattern: str) -> list[str]:
     return [part for part in parts if part]
 
 
+def _strip_enclosing_parentheses(text: str) -> str:
+    """Remove parentheses that wrap an entire SQL condition block."""
+    value = text.strip()
+    while value.startswith('(') and value.endswith(')'):
+        depth = 0
+        quote = None
+        encloses_all = True
+        for index, char in enumerate(value):
+            if quote:
+                if char == quote:
+                    quote = None
+                continue
+            if char in ("'", '"'):
+                quote = char
+            elif char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+                if depth == 0 and index != len(value) - 1:
+                    encloses_all = False
+                    break
+        if not encloses_all or depth != 0:
+            break
+        value = value[1:-1].strip()
+    return value
+
+
+def _split_conjuncts(text: str) -> list[str]:
+    """Flatten parenthesized AND groups while preserving OR expressions."""
+    value = _strip_enclosing_parentheses(text)
+    parts = _split_top_level(value, r'\bAND\b')
+    if len(parts) == 1:
+        # Retain grouping around OR so joining the residual predicates with AND
+        # cannot change Boolean precedence.
+        if len(_split_top_level(value, r'\bOR\b')) > 1:
+            return [text.strip()]
+        return parts
+    flattened = []
+    for part in parts:
+        flattened.extend(_split_conjuncts(part))
+    return flattened
+
+
+def _has_outer_alias_reference(predicate: str, alias: str) -> bool:
+    """Find an alias reference without counting references in scalar subqueries."""
+    value = _strip_enclosing_parentheses(predicate)
+    target = re.compile(rf'(?<!\w){re.escape(alias)}\s*\.', re.IGNORECASE)
+    visible = []
+    quote = None
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(value) and value[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            visible.append(' ')
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            visible.append(' ')
+        elif char == '(' and re.match(r'\s*SELECT\b', value[index + 1:], re.IGNORECASE):
+            depth = 1
+            index += 1
+            nested_quote = None
+            while index < len(value) and depth:
+                nested_char = value[index]
+                if nested_quote:
+                    if nested_char == nested_quote:
+                        nested_quote = None
+                elif nested_char in ("'", '"'):
+                    nested_quote = nested_char
+                elif nested_char == '(':
+                    depth += 1
+                elif nested_char == ')':
+                    depth -= 1
+                index += 1
+            visible.append(' ')
+            continue
+        else:
+            visible.append(char)
+        index += 1
+    return bool(target.search(''.join(visible)))
+
+
 def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
     """Turn comma FROM lists into JOIN clauses using relationship predicates."""
-    statement = re.compile(
-        r'(?P<from>\bFROM\s+)(?P<relations>.*?)(?P<where>\bWHERE\s+)(?P<conditions>.*?)(?P<tail>;|\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|\bUNION\b|\bRETURNING\b|$)',
-        re.IGNORECASE | re.DOTALL,
-    )
+    def find_boundary(start: int, patterns: list[str], semicolon: bool = False):
+        depth = 0
+        quote = None
+        index = start
+        compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+        while index < len(sql):
+            char = sql[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+                index += 1
+                continue
+            if char in ("'", '"'):
+                quote = char
+            elif char == '(':
+                depth += 1
+            elif char == ')':
+                depth = max(0, depth - 1)
+            elif depth == 0:
+                if semicolon and char == ';':
+                    return index, index + 1
+                for pattern in compiled:
+                    match = pattern.match(sql, index)
+                    if match:
+                        return index, match.end()
+            index += 1
+        return len(sql), len(sql)
 
-    def convert(match):
-        relations = _split_top_level(match.group('relations'), r',')
+    def from_positions():
+        positions = []
+        quote = None
+        index = 0
+        keyword = re.compile(r'\bFROM\b', re.IGNORECASE)
+        while index < len(sql):
+            char = sql[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+                index += 1
+                continue
+            if char in ("'", '"'):
+                quote = char
+                index += 1
+                continue
+            match = keyword.match(sql, index)
+            if match:
+                positions.append((match.start(), match.end()))
+                index = match.end()
+                continue
+            index += 1
+        return positions
+
+    def convert_block(from_start, from_end, where_start, where_end, condition_end):
+        relations = _split_top_level(sql[from_end:where_start], r',')
         if len(relations) < 2 or any(re.search(r'\bJOIN\b', item, re.IGNORECASE) for item in relations):
-            return match.group(0)
-        predicates = _split_top_level(match.group('conditions'), r'\bAND\b')
+            return None
+        conditions = sql[where_end:condition_end]
+        predicates = _split_conjuncts(conditions)
         alias_pattern = re.compile(r'(?:\bAS\s+|\s+)([A-Za-z_]\w*)\s*$', re.IGNORECASE)
         relation_aliases = []
         for relation_text in relations:
             alias_match = alias_pattern.search(relation_text)
             if not alias_match:
-                return match.group(0)
+                return None
             relation_aliases.append(alias_match.group(1))
 
         remaining = list(predicates)
         joined = [relation_aliases[0]]
         join_lines = [relations[0]]
         for relation_text, alias in zip(relations[1:], relation_aliases[1:]):
-            current_ref = re.compile(rf'(?<!\w){re.escape(alias)}\s*\.', re.IGNORECASE)
-            prior_ref = re.compile(rf'(?<!\w)(?:{"|".join(re.escape(item) for item in joined)})\s*\.', re.IGNORECASE)
             predicate_index = next(
-                (i for i, predicate in enumerate(remaining) if current_ref.search(predicate) and prior_ref.search(predicate)),
+                (i for i, predicate in enumerate(remaining)
+                 if _has_outer_alias_reference(predicate, alias)
+                 and any(_has_outer_alias_reference(predicate, item) for item in joined)),
                 None,
             )
             if predicate_index is None:
@@ -219,10 +413,43 @@ def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
 
         where_sql = ''
         if remaining:
-            where_sql = f"\n{match.group('where')}{'\nAND '.join(remaining)}"
-        return f"{match.group('from')}{chr(10).join(join_lines)}{where_sql}{match.group('tail')}"
+            where_sql = f"\nWHERE\n{'\nAND '.join(remaining)}"
+        return f"FROM {chr(10).join(join_lines)}{where_sql}"
 
-    converted, count = statement.subn(convert, sql)
+    replacements = []
+    for from_start, from_end in from_positions():
+        where_start, where_end = find_boundary(
+            from_end,
+            [r'\bWHERE\b', r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bUNION\b'],
+            semicolon=True,
+        )
+        if not re.match(r'\bWHERE\b', sql[where_start:where_end], re.IGNORECASE):
+            continue
+        condition_end, _ = find_boundary(
+            where_end,
+            [r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bHAVING\b', r'\bUNION\b',
+             r'\bRETURNING\b', r'(?m)^[ \t]*ELSE\b', r'(?m)^[ \t]*END\s+IF\b'],
+            semicolon=True,
+        )
+        replacement = convert_block(from_start, from_end, where_start, where_end, condition_end)
+        if replacement is not None:
+            if re.match(r'[ \t]*ELSE\b', sql[condition_end:], re.IGNORECASE):
+                replacement = replacement.rstrip() + ';\n'
+            elif re.match(r'[ \t]*END\s+IF\b', sql[condition_end:], re.IGNORECASE):
+                replacement += '\n'
+            replacements.append((from_start, condition_end, replacement))
+
+    # Nested candidates can overlap an outer SELECT. Only apply non-overlapping
+    # blocks from right to left so offsets remain stable.
+    converted = sql
+    applied_start = len(sql) + 1
+    count = 0
+    for start, end, replacement in sorted(replacements, reverse=True):
+        if end > applied_start:
+            continue
+        converted = converted[:start] + replacement + converted[end:]
+        applied_start = start
+        count += 1
     return converted, count
 
 
@@ -287,7 +514,7 @@ def classify_postgresql_routine(text: str, override="auto") -> tuple[str, str, s
     return "procedure", "No explicit return contract; preserve CALL-style behavior.", "default-procedure"
 
 
-def render_postgresql_routine(masked_text: str, target_type: str):
+def render_postgresql_routine(masked_text: str, target_type: str, inferred_result_columns: str | None = None):
     """Render a masked ASA procedure as a PostgreSQL PL/pgSQL routine."""
     match = re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\s+(?P<name>[\w.$\"\[\]]+)", masked_text, re.IGNORECASE)
     if not match:
@@ -305,7 +532,8 @@ def render_postgresql_routine(masked_text: str, target_type: str):
     name = match.group("name")
     trace = []
     if target_type == "function":
-        returns = f"RETURNS TABLE ({result_columns})" if result_columns else "RETURNS SETOF RECORD"
+        table_columns = result_columns or inferred_result_columns
+        returns = f"RETURNS TABLE (\n    {table_columns}\n)" if table_columns else "RETURNS SETOF RECORD"
         simple_select = _simple_select_body(body)
         if simple_select is not None:
             rendered = f"CREATE OR REPLACE FUNCTION {name}{params}\n{returns}\nLANGUAGE sql\nAS $$\n{simple_select.rstrip(';')};\n$$;"
@@ -331,6 +559,7 @@ def render_postgresql_routine(masked_text: str, target_type: str):
 
 def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     """Hoist ASA declarations and convert SET assignments to PL/pgSQL syntax."""
+    body = _convert_asa_if_expressions(body)
     declarations = []
     output = []
     waiting_for_assignment = False
@@ -354,7 +583,29 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
                 continue
             waiting_for_assignment = False
         output.append(line)
-    return "\n".join(declarations), "\n".join(output)
+    normalized_body = "\n".join(output)
+    # The renderer owns the dollar-quoted routine wrapper, so its final PL/pgSQL
+    # END must carry the semicolon inside that wrapper.
+    normalized_body = re.sub(r'(?im)^(?P<indent>\s*)END\s*$', r'\g<indent>END;', normalized_body)
+    return "\n".join(declarations), normalized_body
+
+
+def _convert_asa_if_expressions(body: str) -> str:
+    """Convert ASA's IF expression form to a PostgreSQL CASE expression."""
+    expression = re.compile(
+        r'\bIF\s+(?P<condition>(?:(?!\bIF\b).)*?)\s+THEN\s+'
+        r'(?P<when_true>(?:(?!\bIF\b).)*?)\s+ELSE\s+'
+        r'(?P<when_false>.*?)\s+ENDIF\b',
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def convert(match):
+        condition = match.group('condition').strip()
+        when_true = match.group('when_true').strip()
+        when_false = match.group('when_false').strip()
+        return f"CASE WHEN {condition} THEN {when_true} ELSE {when_false} END"
+
+    return expression.sub(convert, body)
 
 
 def _simple_select_body(text: str):
