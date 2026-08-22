@@ -65,6 +65,13 @@ def save_projects(projects: list[Project], path=None) -> None:
     upsert_projects(projects, path or DATABASE_PATH)
 
 
+def remove_project(project: Project, path=None, workspace_dir: Path = WORKSPACE_DIR) -> None:
+    """Remove a project, its imported copies, and its persisted project record."""
+    from database import DATABASE_PATH, delete_project
+    clear_project_files(project, workspace_dir)
+    delete_project(project.id, path or DATABASE_PATH)
+
+
 def safe_extract_sql_archive(archive: Path, destination: Path) -> list[Path]:
     """Extract supported SQL files from ZIP/TAR without allowing path traversal."""
     destination.mkdir(parents=True, exist_ok=True)

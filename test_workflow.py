@@ -2,7 +2,7 @@ import unittest
 import tarfile
 import zipfile
 
-from workflow import Project, clear_project_files, dialect_for, load_projects, safe_extract_sql_archive, save_projects
+from workflow import Project, clear_project_files, dialect_for, load_projects, remove_project, safe_extract_sql_archive, save_projects
 
 
 class WorkflowTests(unittest.TestCase):
@@ -27,6 +27,18 @@ class WorkflowTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertNotIn('password', columns)
+
+    def test_remove_project_deletes_record_and_workspace_copies(self):
+        workspace_root = self.root / 'workspaces'
+        workspace = workspace_root / 'p-remove'
+        workspace.mkdir(parents=True)
+        (workspace / 'object.sql').write_text('select 1')
+        project = Project('p-remove', 'Remove me', 'SAP ASA', 'PostgreSQL', 'host', 2638, 'db', 'user', 'now', workspace=str(workspace))
+        path = self.root / 'remove.sqlite3'
+        save_projects([project], path)
+        remove_project(project, path, workspace_root)
+        self.assertEqual(load_projects(path), [])
+        self.assertFalse(workspace.exists())
 
     def test_extracts_only_supported_files(self):
         archive = self.root / 'objects.zip'

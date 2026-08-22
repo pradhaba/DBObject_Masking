@@ -12,6 +12,7 @@ from masker import mask_text, unmask_text
 def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
                  target_override="auto", metadata_connection=None):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
+    text = _strip_sql_comments(text)
     if source_dialect == "sybase_asa" and not re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\b", text, re.IGNORECASE):
         raise ValueError("The active SAP ASA skill currently supports procedures only.")
     if database_path is None:
@@ -54,6 +55,47 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["routine_language"] = routine_language
     skill["trace"] = trace
     return restored, mapping, skill
+
+
+def _strip_sql_comments(text: str) -> str:
+    """Remove SQL comments without altering strings or source line structure."""
+    output = []
+    index = 0
+    quote = None
+    while index < len(text):
+        char = text[index]
+        if quote:
+            output.append(char)
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    output.append(text[index + 1])
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            output.append(char)
+            index += 1
+            continue
+        if text[index:index + 2] in {'--', '//'}:
+            index += 2
+            while index < len(text) and text[index] not in '\r\n':
+                index += 1
+            continue
+        if text[index:index + 2] == '/*':
+            index += 2
+            output.append(' ')
+            while index < len(text) and text[index:index + 2] != '*/':
+                if text[index] in '\r\n':
+                    output.append(text[index])
+                index += 1
+            index += 2 if index < len(text) else 0
+            continue
+        output.append(char)
+        index += 1
+    return ''.join(output)
 
 
 def _is_already_masked(text: str) -> bool:
