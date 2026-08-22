@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from workflow import (
     SUPPORTED_DATABASES, WORKSPACE_DIR, clear_project_files, create_project, dialect_for,
     import_sql_files, list_project_files, load_projects, safe_extract_sql_archive, save_projects,
-    test_database_connection,
+    test_database_connection, remove_project,
 )
 from database import (
     add_custom_skill_rule, approve_change_proposal, approve_skill_version, get_skill_version_rules,
@@ -78,6 +78,25 @@ class Launcher:
                 messagebox.showwarning("Projects", "Select a project first."); return
             self.project = next(p for p in self.projects if p.id == selection[0]); self.show_files()
         ttk.Button(buttons, text="Open selected", command=resume).pack(side=tk.LEFT, padx=8)
+        def edit():
+            selection = table.selection()
+            if not selection:
+                messagebox.showwarning("Projects", "Select a project first."); return
+            self.project = next(p for p in self.projects if p.id == selection[0]); self.show_project_form(self.project)
+        def remove():
+            selection = table.selection()
+            if not selection:
+                messagebox.showwarning("Projects", "Select a project first."); return
+            project = next(p for p in self.projects if p.id == selection[0])
+            if not messagebox.askyesno("Remove project", f"Remove project '{project.name}' and its imported file copies?\n\nOriginal source files will not be deleted."):
+                return
+            try: remove_project(project)
+            except Exception as exc: messagebox.showerror("Remove project failed", str(exc)); return
+            self.projects = [item for item in self.projects if item.id != project.id]
+            self.project = None
+            self.show_projects()
+        ttk.Button(buttons, text="Edit selected", command=edit).pack(side=tk.LEFT, padx=8)
+        ttk.Button(buttons, text="Remove selected", command=remove).pack(side=tk.LEFT)
 
     def show_skill_studio(self):
         self.clear()
@@ -254,10 +273,12 @@ class Launcher:
         ttk.Button(bar,text="Test correction",command=test_rule).pack(side=tk.LEFT,padx=8)
         ttk.Button(bar,text="Approve and activate",command=approve).pack(side=tk.LEFT)
 
-    def show_project_form(self):
-        self.clear(); self.heading("Create project", "Connection details define the source and migration target. Passwords are never saved.")
+    def show_project_form(self, project=None):
+        self.clear(); self.heading("Edit project" if project else "Create project", "Connection details define the source and migration target. Passwords are never saved.")
         form = ttk.Frame(self.container); form.pack(anchor=tk.NW, fill=tk.X)
         defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"postgres", "target_username":"", "target_password":""}
+        if project is not None:
+            defaults.update({"name":project.name,"operation":project.default_operation,"scope":project.object_scope,"source":project.source_database,"target":project.target_database,"host":project.host,"port":str(project.port),"database":project.database,"username":project.username,"target_host":project.target_host or "localhost","target_port":str(project.target_port or 5432),"target_database":project.target_database_name or "postgres","target_username":project.target_username,"target_password":getattr(project,"target_password","")})
         vars_ = {key: tk.StringVar(value=value) for key, value in defaults.items()}
         fields = [("Project name","name"),("Purpose","operation"),("Object scope","scope"),("Source dialect","source"),("Target dialect","target"),("Source host","host"),("Source port","port"),("Source database / service","database"),("Source username","username"),("Source password","password"),("Target host","target_host"),("Target port","target_port"),("Target database","target_database"),("Target username","target_username"),("Target password","target_password")]
         for row, (label, key) in enumerate(fields):
@@ -290,14 +311,21 @@ class Launcher:
         def create():
             try: data=details()
             except Exception as exc: messagebox.showerror("Create project", str(exc)); return
-            if data["target_database"] == "PostgreSQL" and not all((data["target_host"], data["target_database_name"], data["target_username"], vars_["target_password"].get())):
-                messagebox.showerror("Create project", "Target host, database, username, and password are required for PostgreSQL migration."); return
-            self.password=vars_["password"].get(); self.target_password=vars_["target_password"].get(); self.project=create_project(**data); self.project.target_password=self.target_password; self.projects.append(self.project); save_projects(self.projects); self.show_files()
+            if data["target_database"] == "PostgreSQL" and not all((data["target_host"], data["target_database_name"], data["target_username"])):
+                messagebox.showerror("Create project", "Target host, database, and username are required for PostgreSQL migration."); return
+            self.password=vars_["password"].get(); self.target_password=vars_["target_password"].get()
+            if project is None:
+                self.project=create_project(**data); self.projects.append(self.project)
+            else:
+                for key,value in data.items():setattr(project,key,value)
+                self.project=project
+            if self.target_password:self.project.target_password=self.target_password
+            save_projects(self.projects); self.show_projects() if project is not None else self.show_files()
         bar=ttk.Frame(self.container); bar.pack(fill=tk.X, pady=20)
         ttk.Button(bar,text="Back",command=self.show_projects).pack(side=tk.LEFT)
         ttk.Button(bar,text="Test connection",command=test).pack(side=tk.LEFT,padx=8)
         ttk.Button(bar,text="Test target connection",command=test_target).pack(side=tk.LEFT,padx=8)
-        ttk.Button(bar,text="Create and continue",command=create).pack(side=tk.LEFT)
+        ttk.Button(bar,text="Save changes" if project else "Create and continue",command=create).pack(side=tk.LEFT)
 
     def show_files(self):
         self.clear(); self.heading(self.project.name, f"{self.project.source_database} → {self.project.target_database}  •  Select database objects to process")

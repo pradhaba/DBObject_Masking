@@ -310,6 +310,20 @@ ENDIF AS head_surname'''
         self.assertIn('RETURNS TABLE (\n    COL_1 integer\n)', rendered)
         self.assertNotIn('RETURNS SETOF RECORD', rendered)
 
+    def test_metadata_resolver_accepts_quoted_table_qualifier(self):
+        from result_metadata import _resolve_expression
+        class Cursor:
+            def __enter__(self):return self
+            def __exit__(self,*_):return False
+            def execute(self,_query,params):self.params=params
+            def fetchone(self):return ('integer',) if self.params == ('dba','treat','provider_id') else None
+        class Connection:
+            def cursor(self):return Cursor()
+        self.assertEqual(
+            _resolve_expression('"treat".provider_id', Connection(), {}, 'dba'),
+            ('provider_id', 'integer'),
+        )
+
     def test_grouped_filters_and_scalar_subquery_do_not_become_join_conditions(self):
         from migration_engine import _convert_comma_tables_to_joins
         sql = '''FROM TBL_5 AS tre, TBL_1 AS head, TBL_4 AS sta, TBL_3 AS pro, TBL_6 AS wtl

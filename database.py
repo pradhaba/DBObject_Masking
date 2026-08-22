@@ -993,6 +993,12 @@ def upsert_projects(projects, path: Path = DATABASE_PATH) -> None:
             )
 
 
+def delete_project(project_id: str, path: Path = DATABASE_PATH) -> None:
+    """Delete one project and its dependent upload/object records."""
+    with closing(connect(path)) as db, db:
+        db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+
 def record_upload(project, files: list[Path], path: Path = DATABASE_PATH) -> None:
     root = Path(project.workspace)
     with closing(connect(path)) as db, db:

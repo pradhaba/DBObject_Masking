@@ -6,6 +6,11 @@ import re
 
 
 IDENT = r'[A-Za-z_][A-Za-z0-9_$]*'
+SQL_IDENT = rf'(?:"[^"]+"|{IDENT})'
+
+
+def _unquote_identifier(value: str) -> str:
+    return value[1:-1].replace('""', '"') if value.startswith('"') and value.endswith('"') else value
 
 
 def infer_returns_table(sql: str, connection, default_schema: str = "dba") -> str:
@@ -110,11 +115,11 @@ def _outer_select_spans(sql: str) -> list[tuple[int, int]]:
 
 
 def _expression_name(expression: str):
-    alias = re.search(rf'\s+AS\s+(?P<alias>{IDENT})\s*$', expression, re.IGNORECASE)
+    alias = re.search(rf'\s+AS\s+(?P<alias>{SQL_IDENT})\s*$', expression, re.IGNORECASE)
     if alias:
-        return alias.group('alias')
-    direct = re.fullmatch(rf'\s*(?:{IDENT}\.)?(?P<column>{IDENT})\s*', expression)
-    return direct.group('column') if direct else None
+        return _unquote_identifier(alias.group('alias'))
+    direct = re.fullmatch(rf'\s*(?:{SQL_IDENT}\.)?(?P<column>{SQL_IDENT})\s*', expression)
+    return _unquote_identifier(direct.group('column')) if direct else None
 
 
 def _split_sql_list(text: str) -> list[str]:
@@ -156,26 +161,29 @@ def _normalize_declared_type(value: str) -> str:
 
 
 def _resolve_expression(expression: str, connection, parameters: dict, default_schema: str):
-    alias_match = re.search(rf'\s+AS\s+(?P<alias>{IDENT})\s*$', expression, re.IGNORECASE)
-    output_name = alias_match.group('alias') if alias_match else None
+    alias_match = re.search(rf'\s+AS\s+(?P<alias>{SQL_IDENT})\s*$', expression, re.IGNORECASE)
+    output_name = _unquote_identifier(alias_match.group('alias')) if alias_match else None
     value = expression[:alias_match.start()].strip() if alias_match else expression.strip()
     parameter = re.fullmatch(IDENT, value)
     if parameter and parameter.group(0).lower() in parameters:
         return output_name or parameter.group(0), parameters[parameter.group(0).lower()]
 
     scalar = re.search(
-        rf'\bSELECT\s+(?P<qual>{IDENT})\.(?P<column>{IDENT})\s+FROM\s+'
-        rf'(?:(?P<schema>{IDENT})\.)?(?P<table>{IDENT})(?:\s+(?:AS\s+)?(?P<table_alias>{IDENT}))?',
+        rf'\bSELECT\s+(?P<qual>{SQL_IDENT})\.(?P<column>{SQL_IDENT})\s+FROM\s+'
+        rf'(?:(?P<schema>{SQL_IDENT})\.)?(?P<table>{SQL_IDENT})(?:\s+(?:AS\s+)?(?P<table_alias>{SQL_IDENT}))?',
         value, re.IGNORECASE | re.DOTALL,
     )
     if scalar:
-        column = scalar.group('column')
-        return output_name or column, _column_type(connection, scalar.group('schema') or default_schema, scalar.group('table'), column)
+        column = _unquote_identifier(scalar.group('column'))
+        schema = _unquote_identifier(scalar.group('schema')) if scalar.group('schema') else default_schema
+        table = _unquote_identifier(scalar.group('table'))
+        return output_name or column, _column_type(connection, schema, table, column)
 
-    direct = re.search(rf'(?P<qual>{IDENT})\.(?P<column>{IDENT})', value)
+    direct = re.search(rf'(?P<qual>{SQL_IDENT})\.(?P<column>{SQL_IDENT})', value)
     if direct:
-        column = direct.group('column')
-        return output_name or column, _column_type(connection, default_schema, direct.group('qual'), column)
+        column = _unquote_identifier(direct.group('column'))
+        qualifier = _unquote_identifier(direct.group('qual'))
+        return output_name or column, _column_type(connection, default_schema, qualifier, column)
     raise ValueError(f"Cannot infer a datatype for result expression: {expression}")
 
 
