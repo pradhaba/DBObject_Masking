@@ -324,6 +324,16 @@ ENDIF AS head_surname'''
             ('provider_id', 'integer'),
         )
 
+    def test_migration_comment_removal_preserves_strings_and_lines(self):
+        from migration_engine import _strip_sql_comments
+        source = "SELECT '--not comment', '// also text', '/* also text */' /* remove\nthis */\n-- remove line\n// remove ASA line\nFROM test;"
+        cleaned = _strip_sql_comments(source)
+        self.assertIn("'--not comment'", cleaned)
+        self.assertIn("'// also text'", cleaned)
+        self.assertIn("'/* also text */'", cleaned)
+        self.assertNotIn('remove', cleaned)
+        self.assertEqual(cleaned.count('\n'), source.count('\n'))
+
     def test_grouped_filters_and_scalar_subquery_do_not_become_join_conditions(self):
         from migration_engine import _convert_comma_tables_to_joins
         sql = '''FROM TBL_5 AS tre, TBL_1 AS head, TBL_4 AS sta, TBL_3 AS pro, TBL_6 AS wtl
