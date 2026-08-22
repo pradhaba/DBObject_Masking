@@ -257,9 +257,9 @@ class Launcher:
     def show_project_form(self):
         self.clear(); self.heading("Create project", "Connection details define the source and migration target. Passwords are never saved.")
         form = ttk.Frame(self.container); form.pack(anchor=tk.NW, fill=tk.X)
-        defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"", "target_username":""}
+        defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"postgres", "target_username":"", "target_password":""}
         vars_ = {key: tk.StringVar(value=value) for key, value in defaults.items()}
-        fields = [("Project name","name"),("Purpose","operation"),("Object scope","scope"),("Source dialect","source"),("Target dialect","target"),("Source host","host"),("Source port","port"),("Source database / service","database"),("Source username","username"),("Source password","password"),("Target host","target_host"),("Target port","target_port"),("Target database","target_database"),("Target username","target_username")]
+        fields = [("Project name","name"),("Purpose","operation"),("Object scope","scope"),("Source dialect","source"),("Target dialect","target"),("Source host","host"),("Source port","port"),("Source database / service","database"),("Source username","username"),("Source password","password"),("Target host","target_host"),("Target port","target_port"),("Target database","target_database"),("Target username","target_username"),("Target password","target_password")]
         for row, (label, key) in enumerate(fields):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0,18), pady=7)
             if key in {"source", "target"}:
@@ -269,9 +269,9 @@ class Launcher:
             elif key == "scope":
                 widget = ttk.Combobox(form, textvariable=vars_[key], values=("one", "multiple", "all"), state="readonly", width=42)
             else:
-                widget = ttk.Entry(form, textvariable=vars_[key], width=45, show="*" if key == "password" else "")
+                widget = ttk.Entry(form, textvariable=vars_[key], width=45, show="*" if key in {"password", "target_password"} else "")
             widget.grid(row=row, column=1, sticky=tk.W, pady=7)
-        status = ttk.Label(form, text=""); status.grid(row=14, column=0, columnspan=2, sticky=tk.W, pady=8)
+        status = ttk.Label(form, text=""); status.grid(row=len(fields), column=0, columnspan=2, sticky=tk.W, pady=8)
         def details():
             if not all(vars_[key].get().strip() for key in ("name","host","port","database","username")):
                 raise ValueError("Complete all required fields.")
@@ -280,13 +280,23 @@ class Launcher:
             try:
                 data=details(); test_database_connection(data["source_database"], data, vars_["password"].get()); status.config(text="Connection successful", foreground="green")
             except Exception as exc: status.config(text=str(exc), foreground="red")
+        def test_target():
+            try:
+                data=details()
+                target_details={"host":data["target_host"], "port":data["target_port"], "database":data["target_database_name"], "username":data["target_username"]}
+                test_database_connection(data["target_database"], target_details, vars_["target_password"].get())
+                status.config(text="Target connection successful", foreground="green")
+            except Exception as exc: status.config(text=str(exc), foreground="red")
         def create():
             try: data=details()
             except Exception as exc: messagebox.showerror("Create project", str(exc)); return
-            self.password=vars_["password"].get(); self.project=create_project(**data); self.projects.append(self.project); save_projects(self.projects); self.show_files()
+            if data["target_database"] == "PostgreSQL" and not all((data["target_host"], data["target_database_name"], data["target_username"], vars_["target_password"].get())):
+                messagebox.showerror("Create project", "Target host, database, username, and password are required for PostgreSQL migration."); return
+            self.password=vars_["password"].get(); self.target_password=vars_["target_password"].get(); self.project=create_project(**data); self.project.target_password=self.target_password; self.projects.append(self.project); save_projects(self.projects); self.show_files()
         bar=ttk.Frame(self.container); bar.pack(fill=tk.X, pady=20)
         ttk.Button(bar,text="Back",command=self.show_projects).pack(side=tk.LEFT)
         ttk.Button(bar,text="Test connection",command=test).pack(side=tk.LEFT,padx=8)
+        ttk.Button(bar,text="Test target connection",command=test_target).pack(side=tk.LEFT,padx=8)
         ttk.Button(bar,text="Create and continue",command=create).pack(side=tk.LEFT)
 
     def show_files(self):
