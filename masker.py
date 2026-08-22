@@ -20,21 +20,7 @@ except ImportError:
 MAP_COMMENT_START = "-- DDL_MASKER_MAPPING_START"
 MAP_COMMENT_END = "-- DDL_MASKER_MAPPING_END"
 
-OBJECT_TYPE_PREFIX = {
-    "table": "TBL",
-    "view": "VW",
-    "procedure": "PROC",
-    "function": "FUNC",
-    "trigger": "TRG",
-    "index": "IDX",
-    "sequence": "SEQ",
-    "type": "TYPE",
-    "column": "COL",
-    "parameter": "PARAM",
-    "variable": "VAR",
-}
-
-SUPPORTED_DIALECTS = ('generic', 'sybase_asa', 'postgresql')
+SUPPORTED_DIALECTS = ('generic', 'oracle', 'sqlserver', 'sybase_ase', 'sybase_asa', 'postgresql')
 
 IDENTIFIER = r'(?:"(?:[^"]|"")+"|\[(?:[^\]]|\]\])+\]|[\w#$@]+)'
 QUALIFIED_IDENTIFIER = rf'{IDENTIFIER}(?:\s*\.\s*{IDENTIFIER})*'
@@ -293,7 +279,7 @@ def extract_object_map(text, dialect='generic'):
         "parameters": set(),
         "variables": set(),
     }
-    if dialect == 'sybase_asa':
+    if dialect in ('sybase_ase', 'sybase_asa'):
         text = text.replace('CREATE PROCEDURE', 'CREATE PROCEDURE')
         text = text.replace('CREATE FUNCTION', 'CREATE FUNCTION')
     elif dialect == 'postgresql':
@@ -334,11 +320,17 @@ def extract_object_map(text, dialect='generic'):
 
 
 def build_mapping(object_map):
+    from database import get_masking_rules
+
     mapping = {}
     counter = 1
-    for object_type in ('tables', 'views', 'procedures', 'functions', 'triggers', 'indexes', 'sequences', 'types', 'columns', 'parameters', 'variables'):
+    for rule in get_masking_rules():
+        singular = rule['object_type']
+        object_type = f'{singular}s'
+        if object_type not in object_map:
+            continue
         mapping[object_type] = {}
-        prefix = OBJECT_TYPE_PREFIX.get(object_type[:-1] if object_type.endswith('s') else object_type, 'OBJ')
+        prefix = rule['token_prefix']
         for original_name in sorted(object_map[object_type], key=lambda o: o.lower()):
             sigil = original_name[0] if original_name.startswith(('@', ':')) else ''
             mapping[object_type][original_name] = f"{sigil}{prefix}_{counter}"
@@ -434,24 +426,29 @@ def split_text_and_mapping_block(text):
 
 def parameter_name_for_dialect(original, dialect, placeholder_has_sigil):
     """Restore a parameter name using conventions of the target dialect."""
+    from database import get_unmasking_rule
+
     bare_name = original.lstrip('@:')
-    if dialect == 'postgresql':
-        return bare_name if bare_name.lower().startswith('p_') else f'p_{bare_name}'
-    if dialect == 'sybase_asa':
+    rule = get_unmasking_rule(dialect)
+    if rule['preserve_at_sigil']:
         return original if original.startswith('@') else f'@{bare_name}'
-    # Generic mode follows the placeholder form, allowing translated SQL that
-    # removed a source-dialect sigil to remain valid.
+    prefix = rule['parameter_prefix']
+    if prefix:
+        return bare_name if bare_name.lower().startswith(prefix.lower()) else f'{prefix}{bare_name}'
     return original if placeholder_has_sigil else bare_name
 
 
 def variable_name_for_dialect(original, dialect, placeholder_has_sigil):
     """Restore a local-variable name using target-dialect conventions."""
+    from database import get_unmasking_rule
+
     bare_name = original.lstrip('@:')
-    if dialect == 'postgresql':
-        # Keep locals distinct from parameters and columns in PL/pgSQL.
-        return bare_name if bare_name.startswith('_') else f'_{bare_name}'
-    if dialect == 'sybase_asa':
+    rule = get_unmasking_rule(dialect)
+    if rule['preserve_at_sigil']:
         return original if original.startswith('@') else f'@{bare_name}'
+    prefix = rule['variable_prefix']
+    if prefix:
+        return bare_name if bare_name.startswith(prefix) else f'{prefix}{bare_name}'
     return original if placeholder_has_sigil else bare_name
 
 
