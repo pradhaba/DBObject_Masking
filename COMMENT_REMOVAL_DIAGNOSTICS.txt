@@ -20,7 +20,7 @@ if text[index:index + 2] in {'--', '//'}:
 
 3. Confirm which migration_engine.py Python imports and test comment removal directly:
 
-python -c "import migration_engine; print(migration_engine.__file__); print(repr(migration_engine._strip_sql_comments('SELECT 1; // remove this comment`nSELECT 2;')))"
+python -c "import migration_engine; print(getattr(migration_engine, '__file__')); sql='SELECT 1; // remove this comment'+chr(10)+'SELECT 2;'; print(repr(migration_engine._strip_sql_comments(sql)))"
 
 Expected cleaned SQL:
 
