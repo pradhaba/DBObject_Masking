@@ -21,6 +21,30 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         skill = get_active_skill_version(source_dialect, target_dialect, database_path)
     if skill is None:
         raise ValueError(f"No active approved migration skill for {source_dialect} → {target_dialect}.")
+    if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        from dynamic_temp_renderer import inline_simple_dynamic_sql, render_dynamic_temp_report, supports_dynamic_temp_report
+        text, dynamic_inline_count = inline_simple_dynamic_sql(text)
+        if supports_dynamic_temp_report(text):
+            _, mapping = mask_text(text, source_dialect, embed_mapping=False)
+            from postgres_formatter import format_postgresql_routine
+            rendered = format_postgresql_routine(render_dynamic_temp_report(text), formatter_indent)
+            skill = dict(skill)
+            skill.update({
+                "target_object_type": "function",
+                "classification_reason": "Dynamic report returns rows; converted to a static parameterized temp-table function.",
+                "classification_rule": "dynamic-temp-result-function",
+                "analysis": analyze_asa_procedure(text),
+                "human_override": target_override if target_override != "auto" else None,
+                "routine_language": "plpgsql",
+                "trace": [{
+                    "line": "renderer", "source": "EXECUTE IMMEDIATE with tmp_records",
+                    "output": "Static parameterized INSERT branches with a PostgreSQL temporary table",
+                    "rules": [{"rule_id": "dynamic-temp-static-renderer", "rule_code": "dynamic-temp-static-renderer", "priority": 1950, "matches": 1}],
+                }],
+            })
+            return rendered, mapping, skill
+    else:
+        dynamic_inline_count = 0
     working_text = text
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         from result_metadata import align_result_selects
@@ -41,6 +65,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
             migrated, target_type, inferred_result_columns
         )
         trace.extend(renderer_trace)
+        if dynamic_inline_count:
+            trace.insert(0, {
+                "line": "preprocessor", "source": "SET dynamic SQL; EXECUTE IMMEDIATE",
+                "output": "Static SQL",
+                "rules": [{"rule_id": "inline-simple-dynamic-sql", "rule_code": "inline-simple-dynamic-sql", "priority": 1960, "matches": dynamic_inline_count}],
+            })
     else:
         routine_language = None
     restored = unmask_text(migrated, mapping, target_dialect)

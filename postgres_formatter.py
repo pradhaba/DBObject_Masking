@@ -36,6 +36,7 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
     paren_depth = 0
     header_parens = False
     returns_table = False
+    sql_case_depth = 0
 
     for line in lines:
         if line == "":
@@ -78,11 +79,15 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
             in_body = False
             continue
 
+        case_end = bool(sql_case_depth and re.match(r"END\b(?!\s+IF\b)", line, re.IGNORECASE))
+        if case_end:
+            sql_case_depth = max(0, sql_case_depth - 1)
+
         if re.match(r"END\s+IF\s*;?$", line, re.IGNORECASE):
             procedural_indent = max(0, procedural_indent - 1)
             line = "END IF;"
             in_query = False
-        elif re.match(r"ELSE\b", line, re.IGNORECASE) and paren_depth == 0:
+        elif re.match(r"ELSE\b", line, re.IGNORECASE) and paren_depth == 0 and sql_case_depth == 0:
             procedural_indent = max(0, procedural_indent - 1)
             line = re.sub(r"^ELSE\b", "ELSE", line, flags=re.IGNORECASE)
             in_query = False
@@ -123,12 +128,16 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
             indent = query_indent + 1
         elif in_query and paren_depth > 0:
             indent = query_indent + 2
+        elif sql_case_depth:
+            indent = procedural_indent + sql_case_depth
 
         output.append(indent_unit * indent + line)
         paren_depth = max(0, paren_depth + _parenthesis_delta(line))
 
         if re.match(r"(?:BEGIN|IF\b.*\bTHEN|ELSIF\b.*\bTHEN|ELSE)$", line, re.IGNORECASE):
             procedural_indent += 1
+        if re.match(r"CASE\b", line, re.IGNORECASE):
+            sql_case_depth += 1
         if line.rstrip().endswith(";") and in_query and paren_depth == 0:
             in_query = False
             select_columns = False

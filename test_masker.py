@@ -364,6 +364,46 @@ $$;'''
         self.assertIn('\n  IF true THEN\n', two_spaces)
         self.assertIn('\n\tIF true THEN\n', tabs)
 
+    def test_dynamic_temp_report_uses_static_parameterized_branches(self):
+        from dynamic_temp_renderer import render_dynamic_temp_report, supports_dynamic_temp_report
+        rendered = render_dynamic_temp_report()
+        self.assertIn('CREATE TEMPORARY TABLE IF NOT EXISTS tmp_records', rendered)
+        self.assertEqual(rendered.count('INSERT INTO tmp_records'), 3)
+        self.assertIn('p_a1_session_id', rendered)
+        self.assertIn('NULLIF(tmp.acc_tot, 0)', rendered)
+        self.assertNotIn('EXECUTE', rendered)
+        self.assertNotIn('||', rendered)
+        fixture = '''create procedure dba.any_name() begin
+        declare local temporary table tmp_records(acc_category integer);
+        select patients_accounts_provider, account_payment_plan, acc_category;
+        execute immediate @sql; end'''
+        self.assertTrue(supports_dynamic_temp_report(fixture))
+        self.assertIn('FUNCTION dba.any_name(', render_dynamic_temp_report(fixture))
+
+    def test_simple_dynamic_sql_is_inlined_without_object_specific_logic(self):
+        from dynamic_temp_renderer import inline_simple_dynamic_sql
+        source = """create procedure dba.any_proc(in p_id integer) begin
+        declare @statement long varchar;
+        set @statement = 'delete from audit_rows where row_id = ' || p_id;
+        execute immediate @statement;
+        end;"""
+        converted, count = inline_simple_dynamic_sql(source)
+        self.assertEqual(count, 1)
+        self.assertIn('delete from audit_rows where row_id = p_id;', converted.lower())
+        self.assertNotIn('execute immediate', converted.lower())
+        self.assertNotIn('declare @statement', converted.lower())
+
+    def test_dynamic_identifiers_are_not_mistaken_for_static_values(self):
+        from dynamic_temp_renderer import inline_simple_dynamic_sql
+        source = """create procedure dba.any_proc(in table_name varchar(30)) begin
+        declare @statement long varchar;
+        set @statement = 'select * from ' || table_name;
+        execute immediate @statement;
+        end;"""
+        converted, count = inline_simple_dynamic_sql(source)
+        self.assertEqual(count, 0)
+        self.assertIn('execute immediate', converted.lower())
+
     def test_metadata_resolver_accepts_quoted_table_qualifier(self):
         from result_metadata import _resolve_expression
         class Cursor:
