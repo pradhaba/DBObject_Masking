@@ -48,3 +48,6 @@ Notes
 - Comments are removed when migration processing begins.
 - SQL Anywhere // comments should not appear in the generated PostgreSQL output.
 - The .venv directory is intentionally excluded from Git and must be created locally.
+
+Get-Process python,pythonw -ErrorAction SilentlyContinue | Stop-Process
+.\.venv\Scripts\python.exe gui.py
