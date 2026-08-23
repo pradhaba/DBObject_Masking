@@ -215,7 +215,8 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    CREATE TEMPORARY TABLE IF NOT EXISTS tmp_records (
+    DROP TABLE IF EXISTS pg_temp.tmp_records;
+    CREATE TEMPORARY TABLE pg_temp.tmp_records (
         acc_id INTEGER,
         number TEXT,
         acc_category INTEGER,
@@ -229,7 +230,6 @@ BEGIN
         midname TEXT,
         title_id INTEGER
     ) ON COMMIT DROP;
-    TRUNCATE TABLE tmp_records;
 
     IF p_al_mode = 1 THEN
         {pap_query}

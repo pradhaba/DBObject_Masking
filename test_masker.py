@@ -367,7 +367,9 @@ $$;'''
     def test_dynamic_temp_report_uses_static_parameterized_branches(self):
         from dynamic_temp_renderer import render_dynamic_temp_report, supports_dynamic_temp_report
         rendered = render_dynamic_temp_report()
-        self.assertIn('CREATE TEMPORARY TABLE IF NOT EXISTS tmp_records', rendered)
+        self.assertIn('DROP TABLE IF EXISTS pg_temp.tmp_records', rendered)
+        self.assertIn('CREATE TEMPORARY TABLE pg_temp.tmp_records', rendered)
+        self.assertNotIn('CREATE TEMPORARY TABLE IF NOT EXISTS', rendered)
         self.assertEqual(rendered.count('INSERT INTO tmp_records'), 3)
         self.assertIn('p_a1_session_id', rendered)
         self.assertIn('NULLIF(tmp.acc_tot, 0)', rendered)
@@ -403,6 +405,61 @@ $$;'''
         converted, count = inline_simple_dynamic_sql(source)
         self.assertEqual(count, 0)
         self.assertIn('execute immediate', converted.lower())
+
+    def test_strict_cte_suitability_requires_one_consumer_and_append_only_writes(self):
+        from cte_analyzer import analyze_cte_suitability
+        eligible = analyze_cte_suitability('''
+        CREATE TEMPORARY TABLE pg_temp.stage(id integer) ON COMMIT DROP;
+        INSERT INTO stage (id) SELECT src.id FROM dba.source AS src;
+        SELECT s.id FROM stage AS s;''')[0]
+        self.assertTrue(eligible['eligible'])
+        self.assertEqual(eligible['mode'], 'single_cte')
+        rejected = analyze_cte_suitability('''
+        CREATE TEMPORARY TABLE pg_temp.stage(id integer) ON COMMIT DROP;
+        INSERT INTO stage (id) SELECT src.id FROM dba.source AS src;
+        UPDATE stage SET id = 2;
+        SELECT s.id FROM stage AS s;
+        SELECT COUNT(*) FROM stage;''')[0]
+        self.assertFalse(rejected['eligible'])
+        self.assertEqual(rejected['mode'], 'keep_temporary_table')
+
+    def test_cte_suitability_detects_complex_derived_query_without_temp_table(self):
+        from cte_analyzer import analyze_cte_suitability
+        decisions = analyze_cte_suitability('''
+        SELECT report.provider_id, report.total
+        FROM (
+            SELECT provider_id, SUM(fee) AS total
+            FROM dba.treat
+            GROUP BY provider_id
+        ) AS report;''')
+        self.assertEqual(len(decisions), 1)
+        self.assertTrue(decisions[0]['eligible'])
+        self.assertEqual(decisions[0]['mode'], 'readability_cte')
+        self.assertEqual(decisions[0]['table'], 'report')
+        simple = analyze_cte_suitability('SELECT p.id FROM dba.patients AS p;')
+        self.assertEqual(simple, [])
+
+    def test_cte_suitability_does_not_promote_scalar_subquery(self):
+        from cte_analyzer import analyze_cte_suitability
+        decisions = analyze_cte_suitability('''
+        SELECT p.id, (SELECT MAX(t.fee) FROM dba.treat AS t WHERE t.patient_id=p.id)
+        FROM dba.patients AS p;''')
+        self.assertEqual(decisions, [])
+
+    def test_complex_derived_query_is_rewritten_to_readability_cte(self):
+        from cte_analyzer import apply_readability_ctes
+        source = '''RETURN QUERY
+        SELECT report.provider_id, report.total
+        FROM (
+            SELECT provider_id, SUM(fee) AS total
+            FROM dba.treat
+            GROUP BY provider_id
+        ) AS report;'''
+        converted, decisions = apply_readability_ctes(source)
+        self.assertIn('WITH report AS (', converted)
+        self.assertIn('FROM report;', converted)
+        self.assertNotIn('FROM (', converted)
+        self.assertEqual(decisions[0]['mode'], 'implemented_readability_cte')
 
     def test_metadata_resolver_accepts_quoted_table_qualifier(self):
         from result_metadata import _resolve_expression

@@ -6,6 +6,13 @@ from workflow import Project, clear_project_files, dialect_for, load_projects, r
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_project_password_is_cached_only_for_application_session(self):
+        from workflow import cache_project_password, forget_project_password, get_project_password
+        cache_project_password('project-1', 'secret', 'target')
+        self.assertEqual(get_project_password('project-1', 'target'), 'secret')
+        forget_project_password('project-1', 'target')
+        self.assertIsNone(get_project_password('project-1', 'target'))
+
     def setUp(self):
         import tempfile
         self.temp = tempfile.TemporaryDirectory()

@@ -28,6 +28,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
             _, mapping = mask_text(text, source_dialect, embed_mapping=False)
             from postgres_formatter import format_postgresql_routine
             rendered = format_postgresql_routine(render_dynamic_temp_report(text), formatter_indent)
+            from cte_analyzer import analyze_cte_suitability, cte_trace
+            cte_analysis = analyze_cte_suitability(rendered)
             skill = dict(skill)
             skill.update({
                 "target_object_type": "function",
@@ -36,11 +38,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                 "analysis": analyze_asa_procedure(text),
                 "human_override": target_override if target_override != "auto" else None,
                 "routine_language": "plpgsql",
+                "cte_analysis": cte_analysis,
                 "trace": [{
                     "line": "renderer", "source": "EXECUTE IMMEDIATE with tmp_records",
                     "output": "Static parameterized INSERT branches with a PostgreSQL temporary table",
                     "rules": [{"rule_id": "dynamic-temp-static-renderer", "rule_code": "dynamic-temp-static-renderer", "priority": 1950, "matches": 1}],
-                }],
+                }] + cte_trace(cte_analysis),
             })
             return rendered, mapping, skill
     else:
@@ -75,8 +78,15 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         routine_language = None
     restored = unmask_text(migrated, mapping, target_dialect)
     if target_dialect == "postgresql":
+        from cte_analyzer import apply_readability_ctes
+        restored, implemented_ctes = apply_readability_ctes(restored)
         from postgres_formatter import format_postgresql_routine
         restored = format_postgresql_routine(restored, formatter_indent)
+        from cte_analyzer import analyze_cte_suitability, cte_trace
+        cte_analysis = implemented_ctes + analyze_cte_suitability(restored)
+        trace.extend(cte_trace(cte_analysis))
+    else:
+        cte_analysis = []
     if target_dialect != "postgresql":
         target_type, reason, classification_rule = "procedure", "Target is not PostgreSQL.", "non-postgresql-target"
     skill = dict(skill)
@@ -87,6 +97,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["human_override"] = target_override if target_override != "auto" else None
     skill["routine_language"] = routine_language
     skill["trace"] = trace
+    skill["cte_analysis"] = cte_analysis
     return restored, mapping, skill
 
 

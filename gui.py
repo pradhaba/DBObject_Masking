@@ -28,24 +28,15 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         metadata_connection = None
         try:
             if target_dialect == 'postgresql':
-                password = getattr(project, 'target_password', None)
-                if password is None:
-                    host = simpledialog.askstring('PostgreSQL metadata', 'Target hostname:', initialvalue=project.target_host or 'localhost')
-                    if host is None:return
-                    database_name = simpledialog.askstring('PostgreSQL metadata', 'Target database name:', initialvalue=project.target_database_name or 'postgres')
-                    if database_name is None:return
-                    username = simpledialog.askstring('PostgreSQL metadata', 'Target username:', initialvalue=project.target_username)
-                    if username is None:return
+                from workflow import cache_project_password, get_project_password
+                if not all((project.target_host, project.target_port, project.target_database_name, project.target_username)):
+                    messagebox.showerror('PostgreSQL metadata', 'Complete the target connection details by editing this project.')
+                    return
+                password = get_project_password(project.id) or getattr(project, 'target_password', None)
+                if not password:
                     password = simpledialog.askstring('PostgreSQL metadata', 'Target password:', show='*')
                     if password is None:return
-                    project.target_host=host.strip(); project.target_database_name=database_name.strip(); project.target_username=username.strip()
-                    from workflow import load_projects, save_projects
-                    projects = load_projects()
-                    for index, saved_project in enumerate(projects):
-                        if saved_project.id == project.id:
-                            projects[index] = project
-                            break
-                    save_projects(projects)
+                    cache_project_password(project.id, password)
                     project.target_password = password
                 import psycopg
                 metadata_connection = psycopg.connect(
@@ -180,24 +171,27 @@ def show_mapping_text(source_text):
     text.config(state='disabled')
 
 
-def build_gui(root=None, initial_files=None, initial_action='mask', initial_dialect='generic', project=None):
+def build_gui(root=None, initial_files=None, initial_action='mask', initial_dialect='generic', project=None, navigation=None):
     root = root or tk.Tk()
     for child in root.winfo_children():
         child.destroy()
-    root.title('DDL Masker GUI')
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
+    window = root.winfo_toplevel()
+    window.title('DDL Masker & Database Migration')
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
     width = min(1350, max(760, screen_width - 80))
     height = min(760, max(520, screen_height - 120))
-    root.geometry(f'{width}x{height}')
-    root.minsize(min(760, width), min(520, height))
+    window.geometry(f'{width}x{height}')
+    window.minsize(min(760, width), min(520, height))
 
     initial_files = list(initial_files or [])
     if project is not None:
         banner = ttk.Frame(root, padding=(10, 8))
         banner.pack(fill=tk.X)
-        ttk.Button(banner, text='Home', command=lambda: return_to_launcher(root)).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(banner, text='Back', command=lambda: return_to_project(root, project)).pack(side=tk.LEFT, padx=(0, 12))
+        home_command = navigation.show_projects if navigation is not None else lambda: return_to_launcher(root)
+        back_command = navigation.show_files if navigation is not None else lambda: return_to_project(root, project)
+        ttk.Button(banner, text='Projects', command=home_command).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(banner, text='Source Files', command=back_command).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Label(banner, text=project.name, font=('Segoe UI', 13, 'bold')).pack(side=tk.LEFT)
         workflow = {'migrate': 'Migration preparation', 'unmask': 'Unmasking'}.get(initial_action, 'Masking')
         ttk.Label(
@@ -389,9 +383,14 @@ def test_migration_in_postgresql(project, run_context):
     if not all((project.target_host, project.target_port, project.target_database_name, project.target_username)):
         messagebox.showerror('PostgreSQL test', 'Complete the target PostgreSQL connection details in the project.')
         return
-    password = simpledialog.askstring('PostgreSQL password', 'Target database password:', show='*')
-    if password is None:
-        return
+    from workflow import cache_project_password, get_project_password
+    password = get_project_password(project.id) or getattr(project, 'target_password', None)
+    if not password:
+        password = simpledialog.askstring('PostgreSQL password', 'Target database password:', show='*')
+        if password is None:
+            return
+        cache_project_password(project.id, password)
+        project.target_password = password
     from deployment import test_postgresql_deployment
 
     result = test_postgresql_deployment(

@@ -15,6 +15,21 @@ from typing import Callable
 APP_DIR = Path.home() / ".ddl_masker"
 WORKSPACE_DIR = APP_DIR / "workspaces"
 SUPPORTED_DATABASES = ("SQL Anywhere ASA", "PostgreSQL", "SAP ASE", "Oracle", "SQL Server")
+_SESSION_PASSWORDS: dict[tuple[str, str], str] = {}
+
+
+def cache_project_password(project_id: str, password: str, connection: str = "target") -> None:
+    """Keep a password in memory for this application process only."""
+    if password:
+        _SESSION_PASSWORDS[(project_id, connection)] = password
+
+
+def get_project_password(project_id: str, connection: str = "target") -> str | None:
+    return _SESSION_PASSWORDS.get((project_id, connection))
+
+
+def forget_project_password(project_id: str, connection: str = "target") -> None:
+    _SESSION_PASSWORDS.pop((project_id, connection), None)
 
 
 @dataclass
@@ -71,6 +86,8 @@ def remove_project(project: Project, path=None, workspace_dir: Path = WORKSPACE_
     from database import DATABASE_PATH, delete_project
     clear_project_files(project, workspace_dir)
     delete_project(project.id, path or DATABASE_PATH)
+    forget_project_password(project.id, "source")
+    forget_project_password(project.id, "target")
 
 
 def safe_extract_sql_archive(archive: Path, destination: Path) -> list[Path]:

@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from workflow import (
     SUPPORTED_DATABASES, WORKSPACE_DIR, clear_project_files, create_project, dialect_for,
     import_sql_files, list_project_files, load_projects, safe_extract_sql_archive, save_projects,
-    test_database_connection, remove_project,
+    test_database_connection, remove_project, cache_project_password,
 )
 from database import (
     add_custom_skill_rule, approve_change_proposal, approve_skill_version, get_skill_version_rules,
@@ -29,24 +29,87 @@ class Launcher:
         self.project = None
         self.password = ""
         root.title("DDL Masker & Database Migration")
-        fit_window(root, 1100, 850, 760, 520)
-        shell = ttk.Frame(root)
-        shell.pack(fill=tk.BOTH, expand=True)
-        self.page_canvas = tk.Canvas(shell, highlightthickness=0)
-        page_scroll = ttk.Scrollbar(shell, orient=tk.VERTICAL, command=self.page_canvas.yview)
-        page_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.page_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.container = ttk.Frame(self.page_canvas, padding=24)
-        self.page_window = self.page_canvas.create_window((0, 0), window=self.container, anchor=tk.NW)
-        self.container.bind("<Configure>", lambda _e: self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all")))
-        self.page_canvas.bind("<Configure>", lambda e: self.page_canvas.itemconfigure(self.page_window, width=e.width))
-        self.page_canvas.configure(yscrollcommand=page_scroll.set)
+        fit_window(root, 1250, 850, 760, 520)
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.pages = {}
+        for key, title in (
+            ("projects", "Projects"), ("settings", "Project Settings"),
+            ("files", "Source Files"), ("migration", "Migration"),
+            ("skills", "Skill Studio"),
+        ):
+            page = ttk.Frame(self.notebook)
+            self.notebook.add(page, text=title)
+            self.pages[key] = page
+        self.page_canvases = {}
+        self.page_containers = {}
+        for key in ("projects", "settings", "files", "skills"):
+            self._prepare_scrolled_page(key)
+        self.container = self.page_containers["projects"]
+        self.page_canvas = self.page_canvases["projects"]
         root.bind("<MouseWheel>", self._scroll_page)
+        self.notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
         self.show_projects()
+
+    def _prepare_scrolled_page(self, key):
+        page = self.pages[key]
+        shell = ttk.Frame(page)
+        shell.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(shell, highlightthickness=0)
+        page_scroll = ttk.Scrollbar(shell, orient=tk.VERTICAL, command=canvas.yview)
+        page_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        container = ttk.Frame(canvas, padding=24)
+        page_window = canvas.create_window((0, 0), window=container, anchor=tk.NW)
+        container.bind("<Configure>", lambda _e, item=canvas: item.configure(scrollregion=item.bbox("all")))
+        canvas.bind("<Configure>", lambda e, item=canvas, window=page_window: item.itemconfigure(window, width=e.width))
+        canvas.configure(yscrollcommand=page_scroll.set)
+        self.page_canvases[key] = canvas
+        self.page_containers[key] = container
+
+    def _activate(self, key):
+        self.container = self.page_containers.get(key, self.pages[key])
+        self.page_canvas = self.page_canvases.get(key)
+        self.notebook.select(self.pages[key])
+
+    def _tab_changed(self, _event=None):
+        selected = self.notebook.select()
+        for key, page in self.pages.items():
+            if str(page) == selected:
+                self.container = self.page_containers.get(key, page)
+                self.page_canvas = self.page_canvases.get(key)
+                if key == "settings" and not self.container.winfo_children():
+                    self.root.after_idle(lambda: self.show_project_form(self.project))
+                elif key == "files" and not self.container.winfo_children():
+                    if self.project is not None:
+                        self.root.after_idle(self.show_files)
+                    else:
+                        self._empty_page("Source Files", "Select or create a project before adding source files.")
+                elif key == "skills" and not self.container.winfo_children():
+                    self.root.after_idle(self.show_skill_studio)
+                elif key == "migration" and not page.winfo_children():
+                    ttk.Label(
+                        page,
+                        text="Select source files and choose Open workspace to start migration.",
+                        padding=30,
+                    ).pack(anchor=tk.NW)
+                break
+
+    def _empty_page(self, title, message):
+        self.clear()
+        self.heading(title, message)
+        ttk.Button(self.container, text="Go to Projects", command=self.show_projects).pack(anchor=tk.W)
+
+    def _open_migration(self, selected, action, dialect, project):
+        self.notebook.select(self.pages["migration"])
+        self.open_workspace(
+            self.pages["migration"], selected, action, dialect, project,
+            navigation=self,
+        )
 
     def _scroll_page(self, event):
         try:
-            if self.page_canvas.winfo_exists():
+            if self.page_canvas is not None and self.page_canvas.winfo_exists():
                 self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
         except tk.TclError:
             pass
@@ -61,6 +124,7 @@ class Launcher:
         ttk.Label(self.container, text=subtitle, foreground="#555").pack(anchor=tk.W, pady=(4, 22))
 
     def show_projects(self):
+        self._activate("projects")
         self.clear()
         self.heading("Projects", "Create a migration project or continue with an existing one.")
         table = ttk.Treeview(self.container, columns=("operation", "source", "target", "scope"), show="headings", height=15)
@@ -99,6 +163,7 @@ class Launcher:
         ttk.Button(buttons, text="Remove selected", command=remove).pack(side=tk.LEFT)
 
     def show_skill_studio(self):
+        self._activate("skills")
         self.clear()
         self.heading("Skill Studio", "Test correction rules and approve immutable skill versions.")
         top_actions=ttk.Frame(self.container)
@@ -217,13 +282,25 @@ class Launcher:
         ttk.Separator(self.container,orient=tk.HORIZONTAL).pack(fill=tk.X,pady=12)
         ttk.Label(self.container,text="PostgreSQL error correction proposals",font=("Segoe UI",11,"bold")).pack(anchor=tk.W)
         proposals = list_change_proposals()
-        table = ttk.Treeview(self.container, columns=("skill","version","status","test"), show="headings", height=9)
+        proposal_list=ttk.Frame(self.container);proposal_list.pack(fill=tk.X,pady=(6,0))
+        table = ttk.Treeview(proposal_list, columns=("skill","version","status","test"), show="headings", height=7)
         for key, label, width in (("skill","Skill",250),("version","Base version",100),("status","Status",140),("test","Test",120)):
             table.heading(key,text=label); table.column(key,width=width)
         for proposal in proposals:
             table.insert("",tk.END,iid=str(proposal["id"]),values=(proposal["skill_name"],proposal["base_version"],proposal["status"],proposal["test_status"]))
-        table.pack(fill=tk.X)
-        editor=ttk.Frame(self.container); editor.pack(fill=tk.BOTH,expand=True,pady=15)
+        proposal_scroll=ttk.Scrollbar(proposal_list,orient=tk.VERTICAL,command=table.yview)
+        proposal_xscroll=ttk.Scrollbar(proposal_list,orient=tk.HORIZONTAL,command=table.xview)
+        table.configure(yscrollcommand=proposal_scroll.set,xscrollcommand=proposal_xscroll.set)
+        table.bind("<MouseWheel>",lambda event:(table.yview_scroll(int(-event.delta/120),"units"),"break")[1])
+        table.grid(row=0,column=0,sticky=tk.NSEW);proposal_scroll.grid(row=0,column=1,sticky=tk.NS)
+        proposal_xscroll.grid(row=1,column=0,sticky=tk.EW);proposal_list.columnconfigure(0,weight=1)
+        if not proposals:
+            ttk.Label(
+                self.container,
+                text="No PostgreSQL error correction proposal currently requires action.",
+                foreground="#555",
+            ).pack(anchor=tk.W,pady=(8,0))
+        editor=ttk.Labelframe(self.container,text="Selected proposal details",padding=12)
         title=tk.StringVar(); reviewer=tk.StringVar(); pattern=tk.StringVar(); replacement=tk.StringVar()
         fields=(("Proposal",title),("Reviewer",reviewer),("Regex pattern",pattern),("Replacement",replacement))
         for row,(label,var) in enumerate(fields):
@@ -238,6 +315,8 @@ class Launcher:
         def load(_event=None):
             try:item=selected()
             except ValueError:return
+            if not editor.winfo_manager():
+                editor.pack(fill=tk.BOTH,expand=True,pady=15)
             title.set(item["title"]); pattern.set(item["pattern"]); replacement.set(item["replacement"])
             rationale.delete("1.0",tk.END); rationale.insert("1.0",item["rationale"])
         table.bind("<<TreeviewSelect>>",load)
@@ -258,6 +337,9 @@ class Launcher:
                 messagebox.showinfo("Skill Studio",f"Approved and activated skill version record #{version_id}.")
                 self.show_skill_studio()
             except Exception as exc:messagebox.showerror("Skill Studio",str(exc))
+        proposal_actions=ttk.Frame(editor);proposal_actions.grid(row=5,column=0,columnspan=2,sticky=tk.EW,pady=(8,0))
+        ttk.Button(proposal_actions,text="Test correction",command=test_rule).pack(side=tk.LEFT)
+        ttk.Button(proposal_actions,text="Approve and activate",command=approve).pack(side=tk.LEFT,padx=8)
         def approve_candidate():
             try:
                 item=selected_skill()
@@ -270,10 +352,9 @@ class Launcher:
         ttk.Button(bar,text="Home",command=self.show_projects).pack(side=tk.LEFT)
         ttk.Button(bar,text="Edit selected skill rules",command=edit_rules).pack(side=tk.LEFT,padx=8)
         ttk.Button(bar,text="Approve selected skill",command=approve_candidate).pack(side=tk.LEFT,padx=8)
-        ttk.Button(bar,text="Test correction",command=test_rule).pack(side=tk.LEFT,padx=8)
-        ttk.Button(bar,text="Approve and activate",command=approve).pack(side=tk.LEFT)
 
     def show_project_form(self, project=None):
+        self._activate("settings")
         self.clear(); self.heading("Edit project" if project else "Create project", "Connection details define the source and migration target. Passwords are never saved.")
         form = ttk.Frame(self.container); form.pack(anchor=tk.NW, fill=tk.X)
         defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"postgres", "target_username":"", "target_password":"", "formatter_indent":"4 spaces"}
@@ -321,7 +402,11 @@ class Launcher:
             else:
                 for key,value in data.items():setattr(project,key,value)
                 self.project=project
-            if self.target_password:self.project.target_password=self.target_password
+            if self.password:
+                cache_project_password(self.project.id, self.password, "source")
+            if self.target_password:
+                cache_project_password(self.project.id, self.target_password, "target")
+                self.project.target_password=self.target_password
             save_projects(self.projects); self.show_projects() if project is not None else self.show_files()
         bar=ttk.Frame(self.container); bar.pack(fill=tk.X, pady=20)
         ttk.Button(bar,text="Back",command=self.show_projects).pack(side=tk.LEFT)
@@ -330,6 +415,7 @@ class Launcher:
         ttk.Button(bar,text="Save changes" if project else "Create and continue",command=create).pack(side=tk.LEFT)
 
     def show_files(self):
+        self._activate("files")
         self.clear(); self.heading(self.project.name, f"{self.project.source_database} → {self.project.target_database}  •  Select database objects to process")
         archive_bar=ttk.Frame(self.container); archive_bar.pack(fill=tk.X)
         archive_var=tk.StringVar(value=self.project.archive_path)
@@ -383,7 +469,7 @@ class Launcher:
             self.project.default_operation=action.get(); self.project.object_scope="one" if len(selected)==1 else ("all" if len(selected)==len(files) else "multiple"); save_projects(self.projects)
             save_object_selection(self.project.id, selected)
             active_database=self.project.target_database if action.get()=="unmask" else self.project.source_database
-            self.open_workspace(self.root, selected, action.get(), dialect_for(active_database), self.project)
+            self._open_migration(selected, action.get(), dialect_for(active_database), self.project)
         ttk.Button(footer,text="Open workspace",command=start).pack(side=tk.RIGHT)
         ttk.Button(footer,text="Projects",command=self.show_projects).pack(side=tk.RIGHT,padx=8)
 
