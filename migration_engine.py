@@ -604,7 +604,7 @@ def _normalize_returns_table_types(columns: str | None) -> str | None:
     if not columns:
         return columns
     return re.sub(
-        r'\b(?:CHARACTER\s+VARYING|VARCHAR|CHAR)\s*\(\s*(?:\*|\d+)\s*\)',
+        r'\b(?:CHARACTER\s+VARYING|VARCHAR|CHARACTER|CHAR)\s*\(\s*(?:\*|\d+)\s*\)',
         'TEXT',
         columns,
         flags=re.IGNORECASE,

@@ -312,10 +312,10 @@ ENDIF AS head_surname'''
 
     def test_returns_table_character_types_are_normalized_to_text(self):
         from migration_engine import _normalize_returns_table_types
-        contract = 'a varchar(50), b CHAR(*), c character varying(120), d character varying, e integer'
+        contract = 'a varchar(50), b CHAR(*), c character varying(120), d character varying, e integer, f CHARACTER(40), g CHARACTER'
         self.assertEqual(
             _normalize_returns_table_types(contract),
-            'a TEXT, b TEXT, c TEXT, d character varying, e integer',
+            'a TEXT, b TEXT, c TEXT, d character varying, e integer, f TEXT, g CHARACTER',
         )
 
     def test_metadata_resolver_accepts_quoted_table_qualifier(self):
