@@ -574,7 +574,7 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
     name = match.group("name")
     trace = []
     if target_type == "function":
-        table_columns = result_columns or inferred_result_columns
+        table_columns = _normalize_returns_table_types(result_columns or inferred_result_columns)
         returns = f"RETURNS TABLE (\n    {table_columns}\n)" if table_columns else "RETURNS SETOF RECORD"
         simple_select = _simple_select_body(body)
         if simple_select is not None:
@@ -597,6 +597,18 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
     trace.append({"line": "renderer", "source": match.group(0), "output": rendered.splitlines()[0],
                   "rules": [{"rule_id": renderer, "rule_code": renderer, "priority": 2000, "matches": 1}]})
     return rendered, trace, routine_language
+
+
+def _normalize_returns_table_types(columns: str | None) -> str | None:
+    """Apply target character-type policy to a RETURNS TABLE contract."""
+    if not columns:
+        return columns
+    return re.sub(
+        r'\b(?:CHARACTER\s+VARYING|VARCHAR|CHAR)\s*\(\s*(?:\*|\d+)\s*\)',
+        'TEXT',
+        columns,
+        flags=re.IGNORECASE,
+    )
 
 
 def _normalize_plpgsql_body(body: str) -> tuple[str, str]:

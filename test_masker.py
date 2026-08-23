@@ -65,9 +65,9 @@ END;'''
             approve_skill_version(candidate['id'], 'tester', path)
             migrated, _, _ = migrate_text(sql, 'sybase_asa', 'postgresql', path)
         self.assertIn('RETURNS TABLE (\n    mailmerge_set_id int,', migrated)
-        self.assertIn('mailmerge_set_name varchar(50),', migrated)
+        self.assertIn('mailmerge_set_name TEXT,', migrated)
         self.assertIn('mailmerge_category_id int,', migrated)
-        self.assertIn('date_column_name varchar(50)\n)', migrated)
+        self.assertIn('date_column_name TEXT\n)', migrated)
         self.assertIn('LANGUAGE sql', migrated)
         self.assertNotIn('RETURN QUERY SELECT 1', migrated)
         self.assertNotIn('\n,\n    mailmerge_category_id', migrated)
@@ -309,6 +309,14 @@ ENDIF AS head_surname'''
         rendered, _, _ = render_postgresql_routine(source, 'function', 'COL_1 integer')
         self.assertIn('RETURNS TABLE (\n    COL_1 integer\n)', rendered)
         self.assertNotIn('RETURNS SETOF RECORD', rendered)
+
+    def test_returns_table_character_types_are_normalized_to_text(self):
+        from migration_engine import _normalize_returns_table_types
+        contract = 'a varchar(50), b CHAR(*), c character varying(120), d character varying, e integer'
+        self.assertEqual(
+            _normalize_returns_table_types(contract),
+            'a TEXT, b TEXT, c TEXT, d character varying, e integer',
+        )
 
     def test_metadata_resolver_accepts_quoted_table_qualifier(self):
         from result_metadata import _resolve_expression
