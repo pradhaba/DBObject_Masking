@@ -153,6 +153,7 @@ PROJECT_COLUMNS = {
     "target_port": "INTEGER NOT NULL DEFAULT 5432",
     "target_database_name": "TEXT NOT NULL DEFAULT ''",
     "target_username": "TEXT NOT NULL DEFAULT ''",
+    "formatter_indent": "TEXT NOT NULL DEFAULT '4 spaces'",
 }
 RUN_COLUMNS = {
     "source_dialect": "TEXT NOT NULL DEFAULT 'generic'",
@@ -980,15 +981,16 @@ def upsert_projects(projects, path: Path = DATABASE_PATH) -> None:
             value = asdict(project)
             db.execute(
                 """INSERT INTO projects
-                (id,name,source_database,target_database,host,port,database_name,username,created_at,archive_path,workspace,default_operation,object_scope,input_type,target_host,target_port,target_database_name,target_username)
-                VALUES (:id,:name,:source_database,:target_database,:host,:port,:database,:username,:created_at,:archive_path,:workspace,:default_operation,:object_scope,:input_type,:target_host,:target_port,:target_database_name,:target_username)
+                (id,name,source_database,target_database,host,port,database_name,username,created_at,archive_path,workspace,default_operation,object_scope,input_type,target_host,target_port,target_database_name,target_username,formatter_indent)
+                VALUES (:id,:name,:source_database,:target_database,:host,:port,:database,:username,:created_at,:archive_path,:workspace,:default_operation,:object_scope,:input_type,:target_host,:target_port,:target_database_name,:target_username,:formatter_indent)
                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, source_database=excluded.source_database,
                 target_database=excluded.target_database, host=excluded.host, port=excluded.port,
                 database_name=excluded.database_name, username=excluded.username,
                 archive_path=excluded.archive_path, workspace=excluded.workspace,
                 default_operation=excluded.default_operation, object_scope=excluded.object_scope,
                 input_type=excluded.input_type,target_host=excluded.target_host,target_port=excluded.target_port,
-                target_database_name=excluded.target_database_name,target_username=excluded.target_username""",
+                target_database_name=excluded.target_database_name,target_username=excluded.target_username,
+                formatter_indent=excluded.formatter_indent""",
                 value,
             )
 

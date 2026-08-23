@@ -10,7 +10,7 @@ from masker import mask_text, unmask_text
 
 
 def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
-                 target_override="auto", metadata_connection=None):
+                 target_override="auto", metadata_connection=None, formatter_indent="4 spaces"):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     text = _strip_sql_comments(text)
     if source_dialect == "sybase_asa" and not re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\b", text, re.IGNORECASE):
@@ -44,6 +44,9 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     else:
         routine_language = None
     restored = unmask_text(migrated, mapping, target_dialect)
+    if target_dialect == "postgresql":
+        from postgres_formatter import format_postgresql_routine
+        restored = format_postgresql_routine(restored, formatter_indent)
     if target_dialect != "postgresql":
         target_type, reason, classification_rule = "procedure", "Target is not PostgreSQL.", "non-postgresql-target"
     skill = dict(skill)

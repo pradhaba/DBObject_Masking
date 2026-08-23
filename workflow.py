@@ -37,6 +37,7 @@ class Project:
     target_port: int = 5432
     target_database_name: str = ""
     target_username: str = ""
+    formatter_indent: str = "4 spaces"
 
     @classmethod
     def from_dict(cls, value: dict) -> "Project":

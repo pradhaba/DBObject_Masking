@@ -318,6 +318,52 @@ ENDIF AS head_surname'''
             'a TEXT, b TEXT, c TEXT, d character varying, e integer, f TEXT, g CHARACTER',
         )
 
+    def test_postgresql_formatter_uses_spaces_and_structured_joins(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''CREATE OR REPLACE FUNCTION dba.f(
+IN p_id INTEGER
+)
+RETURNS TABLE (
+x integer
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+IF p_id = 1 THEN
+RETURN QUERY select
+t.x
+FROM dba.t AS t
+JOIN dba.u AS u ON u.id = t.id
+WHERE t.active = true
+AND u.active = true;
+ELSE
+RETURN QUERY SELECT t.x FROM dba.t AS t;
+END IF;
+END;
+$$;'''
+        formatted = format_postgresql_routine(source)
+        self.assertNotIn('\t', formatted)
+        self.assertIn('    IF p_id = 1 THEN', formatted)
+        self.assertIn('        RETURN QUERY\n        SELECT', formatted)
+        self.assertIn('        JOIN dba.u AS u', formatted)
+        self.assertIn('            ON u.id = t.id', formatted)
+        self.assertIn('            AND u.active = true;', formatted)
+
+    def test_postgresql_formatter_supports_customer_indentation_styles(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''CREATE OR REPLACE PROCEDURE dba.p()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+IF true THEN
+END IF;
+END;
+$$;'''
+        two_spaces = format_postgresql_routine(source, '2 spaces')
+        tabs = format_postgresql_routine(source, 'Tabs')
+        self.assertIn('\n  IF true THEN\n', two_spaces)
+        self.assertIn('\n\tIF true THEN\n', tabs)
+
     def test_metadata_resolver_accepts_quoted_table_qualifier(self):
         from result_metadata import _resolve_expression
         class Cursor:

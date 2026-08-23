@@ -57,6 +57,7 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
                 ddl_text, source_dialect, target_dialect,
                 target_override=target_routine_var.get(),
                 metadata_connection=metadata_connection,
+                formatter_indent=project.formatter_indent,
             )
         except Exception as exc:
             messagebox.showerror('Migration failed', str(exc))
