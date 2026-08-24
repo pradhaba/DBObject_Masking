@@ -353,6 +353,25 @@ ENDIF AS head_surname'''
         self.assertIn('col2 TEXT', rendered)
         self.assertIn('(tab.col2)::TEXT AS col2', rendered)
 
+    def test_pre_normalized_text_contract_still_casts_result_expression(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE PROCEDURE dba.p()
+        RESULT (col1 INTEGER, col2 TEXT)
+        BEGIN SELECT tab.col1 AS col1, tab.col2 AS col2 FROM TBL_1 AS tab; END'''
+        rendered, _, _ = render_postgresql_routine(source, 'function')
+        self.assertIn('(tab.col2)::TEXT AS col2', rendered)
+
+    def test_metadata_mismatch_casts_expression_to_declared_result_type(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE PROCEDURE dba.p()
+        RESULT (item_id INTEGER, amount NUMERIC(20,4))
+        BEGIN SELECT tab.item_id AS item_id, tab.amount AS amount FROM TBL_1 AS tab; END'''
+        rendered, _, _ = render_postgresql_routine(
+            source, 'function', 'item_id smallint, amount numeric(12,2)'
+        )
+        self.assertIn('(tab.item_id)::INTEGER AS item_id', rendered)
+        self.assertIn('(tab.amount)::NUMERIC(20,4) AS amount', rendered)
+
     def test_text_return_cast_is_not_duplicated(self):
         from migration_engine import _cast_returns_table_text_outputs
         source = '''CREATE FUNCTION dba.p() RETURNS TABLE (value TEXT) LANGUAGE sql AS $$
@@ -360,6 +379,34 @@ ENDIF AS head_surname'''
         $$;'''
         rendered = _cast_returns_table_text_outputs(source)
         self.assertEqual(rendered.upper().count('::TEXT'), 1)
+
+    def test_return_query_is_terminated_before_else_and_end_if(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE PROCEDURE dba.p(IN p_mode INTEGER)
+        RESULT (value INTEGER)
+        BEGIN
+        IF p_mode = 1 THEN
+          SELECT t.value FROM TBL_1 AS t
+        ELSE
+          SELECT t.value FROM TBL_1 AS t
+        END IF;
+        END;'''
+        rendered, _, _ = render_postgresql_routine(source, 'function')
+        self.assertRegex(rendered, r't\.value\s+FROM TBL_1 AS t;\s*\n\s*ELSE')
+        self.assertRegex(rendered, r't\.value\s+FROM TBL_1 AS t;\s*\n\s*END IF')
+
+    def test_sql_case_else_does_not_end_return_query(self):
+        from migration_engine import _terminate_return_queries
+        body = '''BEGIN
+RETURN QUERY SELECT CASE
+WHEN true THEN 1
+ELSE 2
+END AS value
+FROM dba.t
+END;'''
+        terminated = _terminate_return_queries(body)
+        self.assertIn('ELSE 2', terminated)
+        self.assertIn('FROM dba.t;', terminated)
 
     def test_postgresql_formatter_uses_spaces_and_structured_joins(self):
         from postgres_formatter import format_postgresql_routine

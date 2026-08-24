@@ -659,12 +659,22 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
         else:
             body = _convert_top_level_result_selects(body)
             declarations, body = _normalize_plpgsql_body(body)
+            body = _terminate_return_queries(body)
             declare_block = f"DECLARE\n{declarations}\n" if declarations else ""
             rendered = f"CREATE OR REPLACE FUNCTION {name}{params}\n{returns}\nLANGUAGE plpgsql\nAS $$\n{declare_block}{body}\n$$;"
             renderer = "postgresql-plpgsql-function-renderer"
             routine_language = "plpgsql"
         if table_columns:
-            rendered = _cast_returns_table_text_outputs(rendered, _character_return_positions(raw_table_columns))
+            cast_targets = _return_cast_targets(table_columns, inferred_result_columns)
+            if inferred_result_columns is None:
+                # Without metadata, character normalization is still known and
+                # PostgreSQL requires VARCHAR/CHAR expressions to match TEXT.
+                cast_targets.update({
+                    position: "TEXT"
+                    for position, column in enumerate(_split_sql_expressions(table_columns))
+                    if _canonical_pg_type(_column_declaration_type(column)) == "text"
+                })
+            rendered = _cast_returns_table_outputs(rendered, cast_targets)
     else:
         declarations, body = _normalize_plpgsql_body(body)
         declare_block = f"DECLARE\n{declarations}\n" if declarations else ""
@@ -710,10 +720,58 @@ def _cast_returns_table_text_outputs(sql: str, positions: set[int] | None = None
     columns = _split_sql_expressions(contract.group(1))
     if positions is None:
         positions = {index for index, column in enumerate(columns) if re.search(r'\bTEXT\b', column, re.IGNORECASE)}
-    if not positions:
+    return _cast_returns_table_outputs(sql, {position: "TEXT" for position in positions})
+
+
+def _return_cast_targets(expected_columns: str | None, actual_columns: str | None) -> dict[int, str]:
+    """Map output positions to declared target types when metadata types differ."""
+    if not expected_columns or not actual_columns:
+        return {}
+    expected = [_column_declaration_type(item) for item in _split_sql_expressions(expected_columns)]
+    actual = [_column_declaration_type(item) for item in _split_sql_expressions(actual_columns)]
+    if len(expected) != len(actual):
+        return {}
+    return {
+        index: expected_type
+        for index, (expected_type, actual_type) in enumerate(zip(expected, actual))
+        if _canonical_pg_type(expected_type) != _canonical_pg_type(actual_type)
+    }
+
+
+def _column_declaration_type(column: str) -> str:
+    match = re.match(r'\s*(?:"[^"]+"|[A-Za-z_]\w*)\s+(.+?)\s*$', column, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _canonical_pg_type(value: str) -> str:
+    normalized = re.sub(r'\s+', ' ', value.strip().lower())
+    normalized = re.sub(r'\s*,\s*', ',', normalized)
+    normalized = re.sub(r'\(\s*', '(', normalized)
+    normalized = re.sub(r'\s*\)', ')', normalized)
+    aliases = {
+        "int": "integer", "int4": "integer",
+        "int2": "smallint", "int8": "bigint",
+        "decimal": "numeric", "float8": "double precision",
+        "bool": "boolean", "varchar": "character varying",
+    }
+    base = re.match(r'[a-z ]+', normalized)
+    if base:
+        original = base.group(0).strip()
+        replacement = aliases.get(original, original)
+        normalized = replacement + normalized[base.end():]
+    return normalized
+
+
+def _cast_returns_table_outputs(sql: str, cast_targets: dict[int, str]) -> str:
+    """Apply positional casts to result-producing SELECT expressions."""
+    if not cast_targets:
         return sql
 
     from result_metadata import _outer_select_spans
+    contract = re.search(r'\bRETURNS\s+TABLE\s*\((.*?)\)\s*LANGUAGE\b', sql, re.IGNORECASE | re.DOTALL)
+    if not contract:
+        return sql
+    columns = _split_sql_expressions(contract.group(1))
     replacements = []
     language_sql = bool(re.search(r'\bLANGUAGE\s+sql\b', sql, re.IGNORECASE))
     for start, end in _outer_select_spans(sql):
@@ -724,9 +782,9 @@ def _cast_returns_table_text_outputs(sql: str, positions: set[int] | None = None
         if len(expressions) != len(columns):
             continue
         changed = False
-        for position in positions:
+        for position, target_type in cast_targets.items():
             if position < len(expressions):
-                casted = _cast_expression_to_text(expressions[position])
+                casted = _cast_expression_to_type(expressions[position], target_type)
                 if casted != expressions[position]:
                     expressions[position] = casted
                     changed = True
@@ -737,15 +795,18 @@ def _cast_returns_table_text_outputs(sql: str, positions: set[int] | None = None
     return sql
 
 
-def _cast_expression_to_text(expression: str) -> str:
+def _cast_expression_to_type(expression: str, target_type: str) -> str:
     alias = re.search(r'\s+AS\s+("?[A-Za-z_]\w*"?)\s*$', expression, re.IGNORECASE)
     value = expression[:alias.start()].strip() if alias else expression.strip()
     suffix = f" AS {alias.group(1)}" if alias else ""
-    if re.search(r'::\s*TEXT\s*$', value, re.IGNORECASE) or re.match(r'^CAST\s*\(.*\s+AS\s+TEXT\s*\)$', value, re.IGNORECASE | re.DOTALL):
+    target_pattern = re.escape(target_type).replace(r'\ ', r'\s+')
+    if re.search(rf'::\s*{target_pattern}\s*$', value, re.IGNORECASE) or re.match(
+        rf'^CAST\s*\(.*\s+AS\s+{target_pattern}\s*\)$', value, re.IGNORECASE | re.DOTALL
+    ):
         return value + suffix
     if re.fullmatch(r'NULL', value, re.IGNORECASE):
-        return "NULL::TEXT" + suffix
-    return f"({value})::TEXT{suffix}"
+        return f"NULL::{target_type}" + suffix
+    return f"({value})::{target_type}{suffix}"
 
 
 def _split_sql_expressions(text: str) -> list[str]:
@@ -804,6 +865,40 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     # END must carry the semicolon inside that wrapper.
     normalized_body = re.sub(r'(?im)^(?P<indent>\s*)END\s*$', r'\g<indent>END;', normalized_body)
     return "\n".join(declarations), normalized_body
+
+
+def _terminate_return_queries(body: str) -> str:
+    """Terminate RETURN QUERY statements before the next PL/pgSQL boundary."""
+    lines = body.splitlines()
+    output = []
+    in_return_query = False
+    sql_case_depth = 0
+    for line in lines:
+        stripped = line.strip()
+        boundary = bool(
+            in_return_query
+            and sql_case_depth == 0
+            and re.match(r'^(?:ELSE|ELSIF\b.*|END\s+IF\b|EXCEPTION\b|END(?:\s+(?:LOOP|WHILE|FOR))?)', stripped, re.I)
+        )
+        if boundary:
+            for index in range(len(output) - 1, -1, -1):
+                if output[index].strip():
+                    if not output[index].rstrip().endswith(';'):
+                        output[index] = output[index].rstrip() + ';'
+                    break
+            in_return_query = False
+
+        output.append(line)
+        if re.match(r'^RETURN\s+QUERY\b', stripped, re.I):
+            in_return_query = True
+        if in_return_query:
+            sql_case_depth += len(re.findall(r'\bCASE\b', stripped, re.I))
+            sql_case_depth -= len(re.findall(r'\bEND\b(?!\s+IF\b)', stripped, re.I))
+            sql_case_depth = max(0, sql_case_depth)
+            if stripped.endswith(';'):
+                in_return_query = False
+                sql_case_depth = 0
+    return "\n".join(output)
 
 
 def _convert_asa_if_expressions(body: str) -> str:
