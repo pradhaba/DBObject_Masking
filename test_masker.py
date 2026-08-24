@@ -140,9 +140,9 @@ END''')
         mapping = {"tables": {"report_one": "TBL_1", "report_two": "TBL_2"}}
         migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
         self.assertIn("FROM TBL_1 AS x", migrated)
-        self.assertIn("JOIN TBL_2 AS rep", migrated)
+        self.assertIn("JOIN TBL_2 AS ret", migrated)
         self.assertIn("x.COL_1", migrated)
-        self.assertIn("rep.COL_2", migrated)
+        self.assertIn("ret.COL_2", migrated)
 
     def test_table_alias_policy_handles_comma_separated_tables(self):
         from migration_engine import _apply_table_alias_policy
@@ -153,10 +153,34 @@ END''')
         )
         mapping = {"tables": {"report_items": "TBL_1", "reports": "TBL_2"}}
         migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
-        self.assertIn("FROM dba.TBL_1 AS rep", migrated)
-        self.assertIn("JOIN dba.TBL_2 AS rep2 ON rep.COL_3 = rep2.COL_3", migrated)
-        self.assertIn("rep.COL_1", migrated)
-        self.assertIn("rep2.COL_2", migrated)
+        self.assertIn("FROM dba.TBL_1 AS rei", migrated)
+        self.assertIn("JOIN dba.TBL_2 AS rep ON rei.COL_3 = rep.COL_3", migrated)
+        self.assertIn("rei.COL_1", migrated)
+        self.assertIn("rep.COL_2", migrated)
+
+    def test_table_aliases_use_word_letters_and_never_numeric_suffixes(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = (
+            "SELECT TBL_1.COL_1, TBL_2.COL_2 FROM dba.TBL_1, dba.TBL_2 "
+            "WHERE TBL_1.COL_1=TBL_2.COL_1"
+        )
+        mapping = {"tables": {"mailmerge_sets": "TBL_1", "mailmerge_types": "TBL_2"}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn("FROM dba.TBL_1 AS mas", migrated)
+        self.assertIn("JOIN dba.TBL_2 AS mat ON mas.COL_1=mat.COL_1", migrated)
+        self.assertNotRegex(migrated, r'\b[A-Za-z_]+\d+\b(?=\.)')
+
+    def test_true_alias_collision_uses_letters_instead_of_number(self):
+        from migration_engine import _apply_table_alias_policy
+        masked = (
+            "SELECT TBL_1.COL_1, TBL_2.COL_2 FROM TBL_1, TBL_2 "
+            "WHERE TBL_1.COL_1=TBL_2.COL_1"
+        )
+        mapping = {"tables": {"mailmerge_sets": "TBL_1", "main_sets": "TBL_2"}}
+        migrated, _ = _apply_table_alias_policy(masked, '{"alias_length":3,"aliases":{}}', mapping)
+        self.assertIn("FROM TBL_1 AS mas", migrated)
+        self.assertIn("JOIN TBL_2 AS mam", migrated)
+        self.assertNotIn("mas2", migrated)
 
     def test_masks_every_table_in_multiline_comma_from_list(self):
         sql = '''SELECT reports.report_id, actions.action_id

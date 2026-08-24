@@ -236,15 +236,44 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
         re.IGNORECASE,
     )
 
-    def unique_alias(base: str) -> str:
+    def alias_base(table_name: str) -> str:
+        words = [word for word in re.split(r'[^A-Za-z]+', table_name.lower()) if word]
+        if not words:
+            return "tbl"[:alias_length]
+        if len(words) >= alias_length:
+            return "".join(word[0] for word in words[:alias_length])
+        allocation = [1] * len(words)
+        remaining = alias_length - len(words)
+        word_index = 0
+        while remaining:
+            if allocation[word_index] < len(words[word_index]):
+                allocation[word_index] += 1
+                remaining -= 1
+            word_index = (word_index + 1) % len(words)
+        return "".join(word[:size] for word, size in zip(words, allocation))
+
+    def unique_alias(base: str, table_name: str = "") -> str:
         candidate = re.sub(r"\W+", "_", base).strip("_") or "tbl"
         if candidate[0].isdigit():
             candidate = f"t_{candidate}"
-        root = candidate
-        suffix = 2
-        while candidate.lower() in used:
-            candidate = f"{root}{suffix}"
-            suffix += 1
+        root = candidate.lower()
+        if candidate.lower() in used:
+            alternatives = []
+            letters = re.sub(r'[^a-z]', '', table_name.lower())
+            if len(root) > 1:
+                alternatives.extend(root[:-1] + letter for letter in letters)
+                alternatives.extend(root[:-1] + letter for letter in "abcdefghijklmnopqrstuvwxyz")
+            else:
+                alternatives.extend(root + letter for letter in "abcdefghijklmnopqrstuvwxyz")
+            for alternative in alternatives:
+                if alternative.lower() not in used:
+                    candidate = alternative
+                    break
+            else:
+                width = 2
+                while candidate.lower() in used:
+                    candidate = root + ("a" * width)
+                    width += 1
         used.add(candidate.lower())
         return candidate
 
@@ -264,11 +293,11 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
             changes += 1
             return f"{prefix}{match.group('relation')} AS {aliases[token_key]}"
         if existing:
-            aliases[token_key] = unique_alias(existing)
+            aliases[token_key] = unique_alias(existing, reverse_tables.get(token_key, token))
             return f"{prefix}{match.group('relation')}{match.group('alias_part')}"
         original = reverse_tables.get(token_key, token)
         configured = overrides.get(original.lower())
-        alias = unique_alias(configured or original[:alias_length].lower())
+        alias = unique_alias(configured or alias_base(original), original)
         aliases[token_key] = alias
         changes += 1
         return f"{prefix}{match.group('relation')} AS {alias}"
