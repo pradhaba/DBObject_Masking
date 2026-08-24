@@ -119,6 +119,17 @@ class RoutineTestPlannerTests(unittest.TestCase):
         self.assertEqual(finding['candidates'],[])
         self.assertFalse(any('DISTINCT' in query for query in connection.current.queries))
 
+    def test_suggestion_table_has_exactly_one_row_per_input_parameter(self):
+        from routine_test_planner import build_routine_test_plan
+        plan = build_routine_test_plan('''CREATE PROCEDURE dba.p(IN p_mode INTEGER, IN p_date DATE) BEGIN
+        IF p_mode = 1 THEN SELECT 1; END IF;
+        IF p_mode = 2 THEN SELECT 2; END IF;
+        SELECT t.id FROM dba.treat AS t WHERE t.created_date BETWEEN p_date AND p_date;
+        END;''')
+        self.assertEqual([item['parameter'] for item in plan['suggestions']], ['p_mode', 'p_date'])
+        mode = plan['suggestions'][0]
+        self.assertEqual(mode['candidates'], [1, 2, 3])
+
 
 if __name__ == '__main__':
     unittest.main()

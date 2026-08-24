@@ -88,15 +88,7 @@ def build_routine_test_plan(source_sql: str, target_sql: str = "") -> dict:
             if not any(item["parameter"] == link["parameter"] and item.get("table") == table and item.get("column") == link["column"] for item in column_links):
                 column_links.append(link)
 
-    suggestions = conditions + column_links
-    linked = {item["parameter"].lower() for item in suggestions}
-    for parameter in parameters:
-        if parameter["name"].lower() not in linked:
-            suggestions.append({
-                "parameter": parameter["name"], "kind": "manual",
-                "condition": "No inferable comparison", "candidates": [],
-                "source": "manual value required",
-            })
+    suggestions = _aggregate_parameter_suggestions(parameters, conditions + column_links)
 
     temporary_names = {
         item.lower() for item in re.findall(
@@ -110,10 +102,18 @@ def build_routine_test_plan(source_sql: str, target_sql: str = "") -> dict:
             by_base[base] = table
     tables = list(by_base.values())
     qualified_by_base = {item["name"].split('.')[-1].lower(): item["name"] for item in tables}
-    for link in column_links:
-        if link.get("table"):
-            link["table"] = qualified_by_base.get(link["table"].split('.')[-1].lower(), link["table"])
-            link["source"] = f"{link['table']}.{link['column']}"
+    for link in suggestions:
+        for value_source in link.get("value_sources", []):
+            value_source["table"] = qualified_by_base.get(
+                value_source["table"].split('.')[-1].lower(), value_source["table"]
+            )
+        if link.get("value_sources"):
+            link["table"] = link["value_sources"][0]["table"]
+            link["column"] = link["value_sources"][0]["column"]
+            column_sources = [f"{item['table']}.{item['column']}" for item in link["value_sources"]]
+            if "procedure condition" in link["source"]:
+                column_sources.insert(0, "procedure condition")
+            link["source"] = "; ".join(column_sources)
     for link in column_links:
         if link["table"] and link["table"].lower() not in {item["name"].lower() for item in tables}:
             tables.append({"name": link["table"], "source_rows": None, "target_rows": None, "status": "not_checked"})
@@ -181,13 +181,14 @@ def apply_data_findings(plan: dict, side: str, row_counts: dict[str, int | None]
         statuses = [table.get("source_status"), table.get("target_status")]
         table["status"] = "missing" if "missing" in statuses else ("empty" if "empty" in statuses else "available")
     for suggestion in plan["suggestions"]:
-        if suggestion["kind"] != "column_value" or not suggestion.get("table"):
+        if not suggestion.get("value_sources"):
             continue
-        values = samples.get((suggestion["table"].lower(), suggestion["column"].lower()), [])
         existing = suggestion.setdefault("candidates", [])
-        for value in values:
-            if value not in existing:
-                existing.append(value)
+        for source in suggestion["value_sources"]:
+            values = samples.get((source["table"].lower(), source["column"].lower()), [])
+            for value in values:
+                if value not in existing:
+                    existing.append(value)
     return plan
 
 
@@ -206,24 +207,23 @@ def collect_data_findings(connection, plan: dict, side: str, database_type: str 
                 _rollback_read_error(connection)
                 row_counts[name.lower()] = None
         for suggestion in plan["suggestions"] if derive_parameter_values else []:
-            if suggestion["kind"] != "column_value" or not suggestion.get("table"):
-                continue
-            table, column = suggestion["table"], suggestion["column"]
-            if row_counts.get(table.lower()) is None:
-                continue
-            try:
-                column_sql = _quote_identifier(column)
-                table_sql = _quote_qualified(table)
-                if database_type in {"SQL Anywhere ASA", "SAP ASA", "SAP ASE", "SQL Server"}:
-                    query = f"SELECT DISTINCT TOP 5 {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL"
-                elif database_type == "Oracle":
-                    query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL FETCH FIRST 5 ROWS ONLY"
-                else:
-                    query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL LIMIT 5"
-                cursor.execute(query)
-                samples[(table.lower(), column.lower())] = [row[0] for row in cursor.fetchmany(5)]
-            except Exception:
-                _rollback_read_error(connection)
+            for source in suggestion.get("value_sources", []):
+                table, column = source["table"], source["column"]
+                if row_counts.get(table.lower()) is None:
+                    continue
+                try:
+                    column_sql = _quote_identifier(column)
+                    table_sql = _quote_qualified(table)
+                    if database_type in {"SQL Anywhere ASA", "SAP ASA", "SAP ASE", "SQL Server"}:
+                        query = f"SELECT DISTINCT TOP 5 {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL"
+                    elif database_type == "Oracle":
+                        query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL FETCH FIRST 5 ROWS ONLY"
+                    else:
+                        query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL LIMIT 5"
+                    cursor.execute(query)
+                    samples[(table.lower(), column.lower())] = [row[0] for row in cursor.fetchmany(5)]
+                except Exception:
+                    _rollback_read_error(connection)
     return apply_data_findings(plan, side, row_counts, samples)
 
 
@@ -246,6 +246,42 @@ def _rollback_read_error(connection) -> None:
 def _routine_name(sql: str) -> str:
     match = re.search(r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROCEDURE|PROC|FUNCTION)\s+((?:[A-Za-z_]\w*\.)?"?[A-Za-z_]\w*"?)', sql, re.I)
     return match.group(1).replace('"', '') if match else ""
+
+
+def _aggregate_parameter_suggestions(parameters: list[dict], findings: list[dict]) -> list[dict]:
+    """Produce exactly one suggestion row for every declared input parameter."""
+    result = []
+    for parameter in parameters:
+        if parameter.get("mode", "IN") == "OUT":
+            continue
+        related = [item for item in findings if item["parameter"].lower() == parameter["name"].lower()]
+        candidates, conditions, sources, kinds, value_sources = [], [], [], [], []
+        for item in related:
+            if item["kind"] not in kinds:
+                kinds.append(item["kind"])
+            if item.get("condition") and item["condition"] not in conditions:
+                conditions.append(item["condition"])
+            if item.get("source") and item["source"] not in sources:
+                sources.append(item["source"])
+            for value in item.get("candidates", []):
+                if value not in candidates:
+                    candidates.append(value)
+            if item.get("table") and item.get("column"):
+                value_source = {"table": item["table"], "column": item["column"]}
+                if value_source not in value_sources:
+                    value_sources.append(value_source)
+        first_source = value_sources[0] if value_sources else {}
+        result.append({
+            "parameter": parameter["name"],
+            "kind": " + ".join(kinds) if kinds else "manual",
+            "condition": "; ".join(conditions) if conditions else "No inferable comparison",
+            "candidates": candidates,
+            "source": "; ".join(sources) if sources else "manual value required",
+            "table": first_source.get("table", ""),
+            "column": first_source.get("column", ""),
+            "value_sources": value_sources,
+        })
+    return result
 
 
 def _target_invocation(sql: str) -> tuple[str, str]:
