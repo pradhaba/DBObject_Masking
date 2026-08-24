@@ -194,7 +194,7 @@ class Launcher:
                     else:
                         details={"host":project.target_host,"port":project.target_port,"database":project.target_database_name,"username":project.target_username};database_type=project.target_database
                     connection=open_database_connection(database_type,details,password);connections.append(connection)
-                    collect_data_findings(connection,plan,side)
+                    collect_data_findings(connection,plan,side,database_type)
                 refresh_tables();refresh_suggestions();refresh_invocations()
                 required=("target_rows",) if mode.get()=="destination_only" else ("source_rows","target_rows")
                 empty=[item["name"] for item in plan["tables"] if any(item.get(field) in {None,0} for field in required)]

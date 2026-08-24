@@ -6,6 +6,9 @@ import datetime
 import re
 
 
+_IDENTIFIER = r'(?:(?:"[^"]+")|(?:[A-Za-z_]\w*))'
+
+
 def build_routine_test_plan(source_sql: str, target_sql: str = "") -> dict:
     """Describe test inputs and data dependencies without executing either routine."""
     routine_name = _routine_name(source_sql) or _routine_name(target_sql) or "unknown_routine"
@@ -42,8 +45,8 @@ def build_routine_test_plan(source_sql: str, target_sql: str = "") -> dict:
 
     column_links = []
     comparison = re.compile(
-        r'(?:(?P<table>[A-Za-z_]\w*)\.)?"?(?P<column>[A-Za-z_]\w*)"?\s*=\s*@?(?P<parameter>[A-Za-z_]\w*)'
-        r'|@?(?P<reverse_parameter>[A-Za-z_]\w*)\s*=\s*(?:(?P<reverse_table>[A-Za-z_]\w*)\.)?"?(?P<reverse_column>[A-Za-z_]\w*)"?',
+        rf'(?:(?P<table>{_IDENTIFIER})\.)?(?P<column>{_IDENTIFIER})\s*=\s*@?(?P<parameter>[A-Za-z_]\w*)'
+        rf'|@?(?P<reverse_parameter>[A-Za-z_]\w*)\s*=\s*(?:(?P<reverse_table>{_IDENTIFIER})\.)?(?P<reverse_column>{_IDENTIFIER})',
         re.I,
     )
     aliases = _table_aliases(analysis_sql)
@@ -51,8 +54,8 @@ def build_routine_test_plan(source_sql: str, target_sql: str = "") -> dict:
         parameter = match.group("parameter") or match.group("reverse_parameter")
         if not parameter or parameter.lower() not in parameter_names:
             continue
-        table_token = match.group("table") or match.group("reverse_table") or ""
-        column = match.group("column") or match.group("reverse_column")
+        table_token = _unquote(match.group("table") or match.group("reverse_table") or "")
+        column = _unquote(match.group("column") or match.group("reverse_column"))
         table = aliases.get(table_token.lower(), table_token) if table_token else ""
         link = {
             "parameter": parameter_names[parameter.lower()]["name"],
@@ -188,7 +191,7 @@ def apply_data_findings(plan: dict, side: str, row_counts: dict[str, int | None]
     return plan
 
 
-def collect_data_findings(connection, plan: dict, side: str) -> dict:
+def collect_data_findings(connection, plan: dict, side: str, database_type: str = "PostgreSQL") -> dict:
     """Check table availability and collect a few distinct parameter values read-only."""
     row_counts: dict[str, int | None] = {}
     samples: dict[tuple[str, str], list] = {}
@@ -208,10 +211,15 @@ def collect_data_findings(connection, plan: dict, side: str) -> dict:
             if row_counts.get(table.lower()) is None:
                 continue
             try:
-                cursor.execute(
-                    f"SELECT DISTINCT {_quote_identifier(column)} FROM {_quote_qualified(table)} "
-                    f"WHERE {_quote_identifier(column)} IS NOT NULL"
-                )
+                column_sql = _quote_identifier(column)
+                table_sql = _quote_qualified(table)
+                if database_type in {"SQL Anywhere ASA", "SAP ASA", "SAP ASE", "SQL Server"}:
+                    query = f"SELECT DISTINCT TOP 5 {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL"
+                elif database_type == "Oracle":
+                    query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL FETCH FIRST 5 ROWS ONLY"
+                else:
+                    query = f"SELECT DISTINCT {column_sql} FROM {table_sql} WHERE {column_sql} IS NOT NULL LIMIT 5"
+                cursor.execute(query)
                 samples[(table.lower(), column.lower())] = [row[0] for row in cursor.fetchmany(5)]
             except Exception:
                 _rollback_read_error(connection)
@@ -326,16 +334,22 @@ def _boundary_candidates(literal: str, operator: str) -> list:
 
 def _table_aliases(sql: str) -> dict[str, str]:
     aliases = {}
-    for match in re.finditer(r'\b(?:FROM|JOIN)\s+((?:[A-Za-z_]\w*\.)?"?[A-Za-z_]\w*"?)\s+(?:AS\s+)?([A-Za-z_]\w*)', sql, re.I):
-        table = match.group(1).replace('"', '')
-        aliases[match.group(2).lower()] = table
+    qualified = rf'{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})?'
+    for match in re.finditer(rf'\b(?:FROM|JOIN)\s+({qualified})\s+(?:AS\s+)?({_IDENTIFIER})', sql, re.I):
+        table = '.'.join(_unquote(part.strip()) for part in re.split(r'\s*\.\s*', match.group(1)))
+        aliases[_unquote(match.group(2)).lower()] = table
     return aliases
 
 
 def _tables(sql: str) -> list[dict]:
     names = []
-    for match in re.finditer(r'\b(?:FROM|JOIN|UPDATE|INSERT\s+INTO)\s+((?:[A-Za-z_]\w*\.)?"?[A-Za-z_]\w*"?)', sql, re.I):
-        name = match.group(1).replace('"', '')
+    qualified = rf'{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})?'
+    for match in re.finditer(rf'\b(?:FROM|JOIN|UPDATE|INSERT\s+INTO)\s+({qualified})', sql, re.I):
+        name = '.'.join(_unquote(part.strip()) for part in re.split(r'\s*\.\s*', match.group(1)))
         if name.lower() not in {item.lower() for item in names} and not name.lower().startswith(('select', 'pg_temp.')):
             names.append(name)
     return [{"name": name, "source_rows": None, "target_rows": None, "status": "not_checked"} for name in names]
+
+
+def _unquote(value: str) -> str:
+    return value[1:-1].replace('""', '"') if value.startswith('"') and value.endswith('"') else value
