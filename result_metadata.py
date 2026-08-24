@@ -15,13 +15,13 @@ def _unquote_identifier(value: str) -> str:
 
 def infer_returns_table(sql: str, connection, default_schema: str = "dba") -> str:
     """Return a PostgreSQL column contract shared by every outer result SELECT."""
-    select_lists = _outer_select_lists(sql)
-    if not select_lists:
+    select_contexts = _outer_select_contexts(sql, default_schema)
+    if not select_contexts:
         raise ValueError("No result-producing SELECT was found for RETURNS TABLE inference.")
     parameters = _parameter_types(sql)
     contracts = [
-        [_resolve_expression(item, connection, parameters, default_schema) for item in _split_sql_list(body)]
-        for body in select_lists
+        [_resolve_expression(item, connection, parameters, default_schema, sources) for item in _split_sql_list(body)]
+        for body, sources in select_contexts
     ]
     expected = contracts[0]
     for branch, contract in enumerate(contracts[1:], start=2):
@@ -64,8 +64,106 @@ def align_result_selects(sql: str) -> str:
     return sql
 
 
+def qualify_unqualified_result_columns(sql: str, connection, default_schema: str = "dba") -> str:
+    """Qualify direct result columns when destination metadata identifies one source table."""
+    replacements = []
+    order_qualifiers: dict[str, str] = {}
+    for start, end in _outer_select_spans(sql):
+        sources = _select_source_tables(sql, end, default_schema)
+        expressions = _split_sql_list(sql[start:end])
+        changed = False
+        for position, expression in enumerate(expressions):
+            direct = re.fullmatch(rf'\s*(?P<column>{SQL_IDENT})\s*', expression)
+            if not direct:
+                continue
+            column_token = direct.group('column')
+            column = _unquote_identifier(column_token)
+            matches = []
+            for schema, table, alias in sources:
+                if _find_column_type(connection, schema, table, column):
+                    matches.append((table, alias))
+            if len(matches) != 1:
+                continue
+            table, alias = matches[0]
+            qualifier = alias if alias.lower() != table.lower() else table
+            expressions[position] = f'{_quote_identifier(qualifier)}.{column_token}'
+            order_qualifiers[column.lower()] = f'{_quote_identifier(qualifier)}.{column_token}'
+            changed = True
+        if changed:
+            original = sql[start:end]
+            leading = re.match(r'\s*', original).group(0)
+            trailing = re.search(r'\s*$', original).group(0)
+            replacements.append((start, end, leading + ',\n    '.join(expressions) + trailing))
+    for start, end, replacement in reversed(replacements):
+        sql = sql[:start] + replacement + sql[end:]
+    for column, qualified in order_qualifiers.items():
+        sql = re.sub(
+            rf'(\bORDER\s+BY\s+)"?{re.escape(column)}"?(?=\s+(?:ASC|DESC)\b|\s*[,;])',
+            lambda match: match.group(1) + qualified,
+            sql,
+            flags=re.IGNORECASE,
+        )
+    return sql
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
 def _outer_select_lists(sql: str) -> list[str]:
     return [sql[start:end].strip() for start, end in _outer_select_spans(sql)]
+
+
+def _outer_select_contexts(sql: str, default_schema: str) -> list[tuple[str, list[tuple[str, str, str]]]]:
+    contexts = []
+    for start, end in _outer_select_spans(sql):
+        contexts.append((sql[start:end].strip(), _select_source_tables(sql, end, default_schema)))
+    return contexts
+
+
+def _select_source_tables(sql: str, from_position: int, default_schema: str) -> list[tuple[str, str, str]]:
+    """Return (schema, table, qualifier) relations in one outer SELECT scope."""
+    start_match = re.match(r'\bFROM\b', sql[from_position:], re.IGNORECASE)
+    if not start_match:
+        return []
+    start = from_position + start_match.end()
+    boundary = re.compile(r'\b(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING|UNION|LIMIT|OFFSET|FETCH)\b|;|\bEND\b', re.I)
+    depth = 0
+    quote = None
+    cursor = start
+    while cursor < len(sql):
+        char = sql[cursor]
+        if quote:
+            if char == quote:
+                if cursor + 1 < len(sql) and sql[cursor + 1] == quote:
+                    cursor += 2
+                    continue
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth = max(0, depth - 1)
+        elif depth == 0 and boundary.match(sql, cursor):
+            break
+        cursor += 1
+    from_body = sql[start:cursor]
+    relation = re.compile(
+        rf'(?:^|,|\bJOIN\b)\s*(?:(?P<schema>{SQL_IDENT})\.)?(?P<table>{SQL_IDENT})'
+        rf'(?:\s+(?:AS\s+)?(?P<alias>{SQL_IDENT}))?',
+        re.I,
+    )
+    reserved = {'on', 'where', 'join', 'left', 'right', 'full', 'inner', 'outer', 'cross'}
+    sources = []
+    for match in relation.finditer(from_body):
+        schema = _unquote_identifier(match.group('schema')) if match.group('schema') else default_schema
+        table = _unquote_identifier(match.group('table'))
+        alias = _unquote_identifier(match.group('alias')) if match.group('alias') else table
+        if alias.lower() in reserved:
+            alias = table
+        sources.append((schema, table, alias))
+    return sources
 
 
 def _outer_select_spans(sql: str) -> list[tuple[int, int]]:
@@ -160,13 +258,24 @@ def _normalize_declared_type(value: str) -> str:
     return replacements.get(base, value.lower()) + value[len(base):] if '(' in value else replacements.get(base, value.lower())
 
 
-def _resolve_expression(expression: str, connection, parameters: dict, default_schema: str):
+def _resolve_expression(expression: str, connection, parameters: dict, default_schema: str,
+                        source_tables: list[tuple[str, str, str]] | None = None):
     alias_match = re.search(rf'\s+AS\s+(?P<alias>{SQL_IDENT})\s*$', expression, re.IGNORECASE)
     output_name = _unquote_identifier(alias_match.group('alias')) if alias_match else None
     value = expression[:alias_match.start()].strip() if alias_match else expression.strip()
     parameter = re.fullmatch(IDENT, value)
     if parameter and parameter.group(0).lower() in parameters:
         return output_name or parameter.group(0), parameters[parameter.group(0).lower()]
+
+    unqualified = re.fullmatch(SQL_IDENT, value)
+    if unqualified and source_tables:
+        column = _unquote_identifier(unqualified.group(0))
+        return output_name or column, _unique_source_column_type(connection, source_tables, column)
+
+    if output_name and source_tables:
+        matching_type = _unique_source_column_type(connection, source_tables, output_name, required=False)
+        if matching_type:
+            return output_name, matching_type
 
     scalar = re.search(
         rf'\bSELECT\s+(?P<qual>{SQL_IDENT})\.(?P<column>{SQL_IDENT})\s+FROM\s+'
@@ -183,11 +292,40 @@ def _resolve_expression(expression: str, connection, parameters: dict, default_s
     if direct:
         column = _unquote_identifier(direct.group('column'))
         qualifier = _unquote_identifier(direct.group('qual'))
+        if source_tables:
+            matches = [(schema, table) for schema, table, alias in source_tables
+                       if qualifier.lower() in {table.lower(), alias.lower()}]
+            if len(matches) == 1:
+                return output_name or column, _column_type(connection, matches[0][0], matches[0][1], column)
         return output_name or column, _column_type(connection, default_schema, qualifier, column)
     raise ValueError(f"Cannot infer a datatype for result expression: {expression}")
 
 
+def _unique_source_column_type(connection, source_tables: list[tuple[str, str, str]], column: str,
+                               required: bool = True) -> str | None:
+    matches = []
+    for schema, table, _alias in source_tables:
+        data_type = _find_column_type(connection, schema, table, column)
+        if data_type:
+            matches.append((schema, table, data_type))
+    if len(matches) == 1:
+        return matches[0][2]
+    if len(matches) > 1:
+        locations = ', '.join(f'{schema}.{table}' for schema, table, _ in matches)
+        raise ValueError(f'Ambiguous unqualified result column {column}; found in {locations}.')
+    if required:
+        raise ValueError(f'PostgreSQL metadata not found for unqualified result column {column}.')
+    return None
+
+
 def _column_type(connection, schema: str, table: str, column: str) -> str:
+    data_type = _find_column_type(connection, schema, table, column)
+    if data_type is None:
+        raise ValueError(f"PostgreSQL metadata not found for {schema}.{table}.{column}.")
+    return data_type
+
+
+def _find_column_type(connection, schema: str, table: str, column: str) -> str | None:
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT pg_catalog.format_type(a.atttypid,a.atttypmod)
@@ -199,6 +337,4 @@ def _column_type(connection, schema: str, table: str, column: str) -> str:
             (schema, table, column),
         )
         row = cursor.fetchone()
-    if not row:
-        raise ValueError(f"PostgreSQL metadata not found for {schema}.{table}.{column}.")
-    return row[0]
+    return row[0] if row else None

@@ -52,7 +52,9 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         dynamic_inline_count = 0
     working_text = text
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
-        from result_metadata import align_result_selects
+        from result_metadata import align_result_selects, qualify_unqualified_result_columns
+        if metadata_connection is not None:
+            working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
         working_text = align_result_selects(working_text)
     if _is_already_masked(working_text):
         masked, mapping = working_text, _identity_mapping(working_text)
@@ -581,6 +583,8 @@ def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
                 replacement = replacement.rstrip() + ';\n'
             elif re.match(r'[ \t]*END\s+IF\b', sql[condition_end:], re.IGNORECASE):
                 replacement += '\n'
+            elif re.match(r'\s*(?:GROUP\s+BY|ORDER\s+BY|HAVING|UNION|RETURNING)\b', sql[condition_end:], re.IGNORECASE):
+                replacement = replacement.rstrip() + '\n'
             replacements.append((from_start, condition_end, replacement))
 
     # Nested candidates can overlap an outer SELECT. Only apply non-overlapping

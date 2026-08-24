@@ -648,6 +648,39 @@ $$;'''
             ('provider_id', 'integer'),
         )
 
+    def test_result_metadata_qualifies_unique_unqualified_result_columns(self):
+        from result_metadata import qualify_unqualified_result_columns
+        columns = {
+            ('dba', 'saved_reports', 'saved_report_web_id'): 'integer',
+            ('dba', 'saved_reports', 'file_size'): 'integer',
+            ('dba', 'reports', 'report_id'): 'integer',
+        }
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _query, params): self.params = tuple(value.lower() for value in params)
+            def fetchone(self):
+                value = columns.get(self.params)
+                return (value,) if value else None
+        class Connection:
+            def cursor(self): return Cursor()
+        source = '''SELECT saved_report_web_id, file_size
+FROM dba.saved_reports, dba.reports
+ORDER BY saved_report_web_id ASC;'''
+        qualified = qualify_unqualified_result_columns(source, Connection())
+        self.assertIn('"saved_reports".saved_report_web_id', qualified)
+        self.assertIn('"saved_reports".file_size', qualified)
+        self.assertIn('ORDER BY "saved_reports".saved_report_web_id ASC', qualified)
+
+    def test_join_conversion_preserves_newline_before_order_by(self):
+        from migration_engine import _convert_comma_tables_to_joins
+        source = '''FROM dba.TBL_1 AS one, dba.TBL_2 AS two
+WHERE one.COL_1 = two.COL_1
+ORDER BY one.COL_1;'''
+        converted, count = _convert_comma_tables_to_joins(source)
+        self.assertEqual(count, 1)
+        self.assertIn('ON one.COL_1 = two.COL_1\nORDER BY', converted)
+
     def test_migration_comment_removal_preserves_strings_and_lines(self):
         from migration_engine import _strip_sql_comments
         source = "SELECT '--not comment', '// also text', '/* also text */' /* remove\nthis */\n-- remove line\n// remove ASA line\nFROM test;"
