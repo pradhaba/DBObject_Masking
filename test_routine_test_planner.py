@@ -130,6 +130,28 @@ class RoutineTestPlannerTests(unittest.TestCase):
         mode = plan['suggestions'][0]
         self.assertEqual(mode['candidates'], [1, 2, 3])
 
+    def test_result_columns_never_become_call_parameters(self):
+        from routine_test_planner import build_routine_test_plan, generate_invocation_sql
+        source = '''CREATE PROCEDURE DBA."w3_get_mailmerge_sets"
+        (@category_id int, @b_automation int)
+        RESULT
+        (mailmerge_set_id int, mailmerge_set_name varchar(50),
+         mailmerge_category_id int, date_column_name varchar(50))
+        BEGIN IF @b_automation = 1 THEN
+        SELECT m.mailmerge_set_id FROM dba.mailmerge_sets AS m
+        WHERE m.mailmerge_category_id=@category_id; END IF; END;'''
+        target = '''CREATE FUNCTION DBA.w3_get_mailmerge_sets(
+        IN p_category_id integer, IN p_b_automation integer)
+        RETURNS TABLE(mailmerge_set_id integer, mailmerge_set_name text,
+        mailmerge_category_id integer, date_column_name text)
+        LANGUAGE plpgsql AS $$ BEGIN END $$;'''
+        plan = build_routine_test_plan(source, target)
+        self.assertEqual([item['name'] for item in plan['parameters']], ['category_id', 'b_automation'])
+        self.assertEqual([item['parameter'] for item in plan['suggestions']], ['category_id', 'b_automation'])
+        call = generate_invocation_sql(plan)[0]
+        self.assertEqual(call.count(','), 1)
+        self.assertNotIn('mailmerge_set_name', call)
+
 
 if __name__ == '__main__':
     unittest.main()

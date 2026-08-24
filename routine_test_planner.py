@@ -325,15 +325,45 @@ def _sql_literal(value, datatype: str) -> str:
 
 
 def _parameters(sql: str) -> list[dict]:
-    header = re.search(r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROCEDURE|PROC|FUNCTION)\b[^\(]*\((.*?)\)\s*(?:RESULT|RETURNS|BEGIN|LANGUAGE)', sql, re.I | re.S)
-    if not header:
+    declaration = re.search(
+        r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROCEDURE|PROC|FUNCTION)\b', sql, re.I
+    )
+    if not declaration:
+        return []
+    opening = sql.find('(', declaration.end())
+    if opening < 0:
+        return []
+    closing = _matching_parenthesis(sql, opening)
+    if closing is None:
         return []
     result = []
-    for item in _split_top_level(header.group(1)):
+    for item in _split_top_level(sql[opening + 1:closing]):
         match = re.match(r'\s*(?:(INOUT|IN|OUT)\s+)?@?"?([A-Za-z_]\w*)"?\s+(.+?)\s*$', item, re.I | re.S)
         if match:
             result.append({"mode": (match.group(1) or "IN").upper(), "name": match.group(2), "datatype": match.group(3).strip()})
     return result
+
+
+def _matching_parenthesis(text: str, opening: int) -> int | None:
+    depth, quote, index = 0, None, opening
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
 
 
 def _split_top_level(value: str) -> list[str]:
