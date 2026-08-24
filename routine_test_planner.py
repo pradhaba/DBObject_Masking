@@ -191,8 +191,9 @@ def apply_data_findings(plan: dict, side: str, row_counts: dict[str, int | None]
     return plan
 
 
-def collect_data_findings(connection, plan: dict, side: str, database_type: str = "PostgreSQL") -> dict:
-    """Check table availability and collect a few distinct parameter values read-only."""
+def collect_data_findings(connection, plan: dict, side: str, database_type: str = "PostgreSQL",
+                          derive_parameter_values: bool = True) -> dict:
+    """Check table availability and optionally derive parameter values read-only."""
     row_counts: dict[str, int | None] = {}
     samples: dict[tuple[str, str], list] = {}
     with connection.cursor() as cursor:
@@ -204,7 +205,7 @@ def collect_data_findings(connection, plan: dict, side: str, database_type: str 
             except Exception:
                 _rollback_read_error(connection)
                 row_counts[name.lower()] = None
-        for suggestion in plan["suggestions"]:
+        for suggestion in plan["suggestions"] if derive_parameter_values else []:
             if suggestion["kind"] != "column_value" or not suggestion.get("table"):
                 continue
             table, column = suggestion["table"], suggestion["column"]

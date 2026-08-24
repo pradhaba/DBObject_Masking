@@ -98,6 +98,27 @@ class RoutineTestPlannerTests(unittest.TestCase):
         finding=next(item for item in plan['suggestions'] if item['parameter']=='category_id')
         self.assertEqual(finding['candidates'],[10,20,30])
 
+    def test_source_data_check_never_derives_parameter_values(self):
+        from routine_test_planner import build_routine_test_plan, collect_data_findings
+        plan = build_routine_test_plan('''CREATE PROCEDURE dba.p(IN category_id INTEGER) BEGIN
+        SELECT m.category_id FROM dba.mailmerge AS m WHERE m.category_id=category_id; END;''')
+        class Cursor:
+            def __init__(self): self.queries=[]; self.rows=[]
+            def __enter__(self): return self
+            def __exit__(self,*_): return False
+            def execute(self,query): self.queries.append(query);self.rows=[(55,)]
+            def fetchone(self): return self.rows[0]
+            def fetchmany(self,size): return self.rows[:size]
+        class Connection:
+            def __init__(self): self.current=Cursor()
+            def cursor(self): return self.current
+            def rollback(self): pass
+        connection=Connection()
+        collect_data_findings(connection,plan,'source','SQL Anywhere ASA',derive_parameter_values=False)
+        finding=next(item for item in plan['suggestions'] if item['parameter']=='category_id')
+        self.assertEqual(finding['candidates'],[])
+        self.assertFalse(any('DISTINCT' in query for query in connection.current.queries))
+
 
 if __name__ == '__main__':
     unittest.main()

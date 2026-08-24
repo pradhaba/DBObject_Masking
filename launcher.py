@@ -176,32 +176,46 @@ class Launcher:
         result_status=tk.StringVar(value="Awaiting test-plan approval. No routine has been executed.")
         ttk.Label(results,textvariable=result_status,foreground="#555").pack(anchor=tk.W)
 
-        def password_for(side):
+        def password_for(side,prompt=True):
             password=get_project_password(project.id,side) or getattr(project,f"{side}_password",None)
-            if not password:
+            if not password and prompt:
                 password=simpledialog.askstring("Database password",f"{side.title()} database password:",show="*",parent=self.root)
                 if password:cache_project_password(project.id,password,side)
             return password
-        def check_data():
-            plan["validation_mode"]=mode.get();connections=[]
+        def run_data_checks(sides, automatic=False):
+            connections=[]
             try:
-                sides=["target"] if mode.get()=="destination_only" else ["source","target"]
                 for side in sides:
-                    password=password_for(side)
+                    password=password_for(side,prompt=not automatic)
                     if password is None:return
                     if side=="source":
                         details={"host":project.host,"port":project.port,"database":project.database,"username":project.username};database_type=project.source_database
                     else:
                         details={"host":project.target_host,"port":project.target_port,"database":project.target_database_name,"username":project.target_username};database_type=project.target_database
                     connection=open_database_connection(database_type,details,password);connections.append(connection)
-                    collect_data_findings(connection,plan,side,database_type)
+                    collect_data_findings(
+                        connection, plan, side, database_type,
+                        derive_parameter_values=(side == "target"),
+                    )
                 refresh_tables();refresh_suggestions();refresh_invocations()
                 required=("target_rows",) if mode.get()=="destination_only" else ("source_rows","target_rows")
                 empty=[item["name"] for item in plan["tables"] if any(item.get(field) in {None,0} for field in required)]
-                status.set("Data check complete." if not empty else "Sample data required for: "+", ".join(empty))
-            except Exception as exc:messagebox.showerror("Routine Test Plan",str(exc))
+                if automatic:
+                    target_empty=[item["name"] for item in plan["tables"] if item.get("target_rows") in {None,0}]
+                    status.set("Destination parameter values derived." if not target_empty else "Destination sample data required for: "+", ".join(target_empty))
+                else:
+                    status.set("Data check complete." if not empty else "Sample data required for: "+", ".join(empty))
+            except Exception as exc:
+                if automatic:
+                    status.set("Automatic destination value discovery failed: "+str(exc))
+                else:
+                    messagebox.showerror("Routine Test Plan",str(exc))
             finally:
                 for connection in connections:connection.close()
+        def check_data():
+            plan["validation_mode"]=mode.get()
+            sides=["target"] if mode.get()=="destination_only" else ["source","target"]
+            run_data_checks(sides)
         def approve():
             plan["validation_mode"]=mode.get()
             required=("target_rows",) if mode.get()=="destination_only" else ("source_rows","target_rows")
@@ -216,8 +230,9 @@ class Launcher:
             result_status.set("Approved and ready for the execution-and-comparison stage. No routine has been executed yet.")
             messagebox.showinfo("Routine Test Plan","Test plan approved. It is ready for the execution-and-comparison stage.")
         actions=ttk.Frame(self.container);actions.pack(fill=tk.X,pady=10)
-        ttk.Button(actions,text="Check table data and derive values",command=check_data).pack(side=tk.LEFT)
+        ttk.Button(actions,text="Recheck tables and destination values",command=check_data).pack(side=tk.LEFT)
         ttk.Button(actions,text="Approve test plan",command=approve).pack(side=tk.LEFT,padx=8)
+        self.root.after_idle(lambda: run_data_checks(["target"],automatic=True))
 
     def _scroll_page(self, event):
         try:
