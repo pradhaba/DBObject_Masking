@@ -318,6 +318,25 @@ ENDIF AS head_surname'''
             'a TEXT, b TEXT, c TEXT, d character varying, e integer, f TEXT, g CHARACTER',
         )
 
+    def test_character_return_columns_are_cast_to_text_in_result_query(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE PROCEDURE dba.p()
+        RESULT (col1 INTEGER, col2 VARCHAR(300))
+        BEGIN
+        SELECT tab.col1 AS col1, tab.col2 AS col2 FROM TBL_1 AS tab;
+        END'''
+        rendered, _, _ = render_postgresql_routine(source, 'function')
+        self.assertIn('col2 TEXT', rendered)
+        self.assertIn('(tab.col2)::TEXT AS col2', rendered)
+
+    def test_text_return_cast_is_not_duplicated(self):
+        from migration_engine import _cast_returns_table_text_outputs
+        source = '''CREATE FUNCTION dba.p() RETURNS TABLE (value TEXT) LANGUAGE sql AS $$
+        SELECT tab.value::TEXT AS value FROM dba.tab AS tab;
+        $$;'''
+        rendered = _cast_returns_table_text_outputs(source)
+        self.assertEqual(rendered.upper().count('::TEXT'), 1)
+
     def test_postgresql_formatter_uses_spaces_and_structured_joins(self):
         from postgres_formatter import format_postgresql_routine
         source = '''CREATE OR REPLACE FUNCTION dba.f(

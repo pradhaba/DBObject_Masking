@@ -182,6 +182,23 @@ def test_database_connection(database_type: str, details: dict, password: str) -
     connection.close()
 
 
+def open_database_connection(database_type: str, details: dict, password: str):
+    """Open a supported project database connection for read-only planning tasks."""
+    connectors: dict[str, Callable[[], object]] = {
+        "PostgreSQL": lambda: _postgres_connection(details, password),
+        "Oracle": lambda: _oracle_connection(details, password),
+        "SQL Server": lambda: _sqlserver_connection(details, password),
+        "SAP ASE": lambda: _sap_connection(details, password, "SAP ASE ODBC Driver"),
+        "SAP ASA": lambda: _sap_connection(details, password, "SQL Anywhere 17"),
+        "SQL Anywhere ASA": lambda: _sap_connection(details, password, "SQL Anywhere 17"),
+    }
+    try:
+        connector = connectors[database_type]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported database type: {database_type}") from exc
+    return connector()
+
+
 def _postgres_connection(d, password):
     try:
         import psycopg

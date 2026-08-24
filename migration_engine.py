@@ -27,7 +27,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         if supports_dynamic_temp_report(text):
             _, mapping = mask_text(text, source_dialect, embed_mapping=False)
             from postgres_formatter import format_postgresql_routine
-            rendered = format_postgresql_routine(render_dynamic_temp_report(text), formatter_indent)
+            rendered = _cast_returns_table_text_outputs(render_dynamic_temp_report(text))
+            rendered = format_postgresql_routine(rendered, formatter_indent)
             from cte_analyzer import analyze_cte_suitability, cte_trace
             cte_analysis = analyze_cte_suitability(rendered)
             skill = dict(skill)
@@ -618,7 +619,8 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
     name = match.group("name")
     trace = []
     if target_type == "function":
-        table_columns = _normalize_returns_table_types(result_columns or inferred_result_columns)
+        raw_table_columns = result_columns or inferred_result_columns
+        table_columns = _normalize_returns_table_types(raw_table_columns)
         returns = f"RETURNS TABLE (\n    {table_columns}\n)" if table_columns else "RETURNS SETOF RECORD"
         simple_select = _simple_select_body(body)
         if simple_select is not None:
@@ -632,6 +634,8 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
             rendered = f"CREATE OR REPLACE FUNCTION {name}{params}\n{returns}\nLANGUAGE plpgsql\nAS $$\n{declare_block}{body}\n$$;"
             renderer = "postgresql-plpgsql-function-renderer"
             routine_language = "plpgsql"
+        if table_columns:
+            rendered = _cast_returns_table_text_outputs(rendered, _character_return_positions(raw_table_columns))
     else:
         declarations, body = _normalize_plpgsql_body(body)
         declare_block = f"DECLARE\n{declarations}\n" if declarations else ""
@@ -653,6 +657,91 @@ def _normalize_returns_table_types(columns: str | None) -> str | None:
         columns,
         flags=re.IGNORECASE,
     )
+
+
+def _character_return_positions(columns: str | None) -> set[int]:
+    """Return output positions whose declared character type was normalized to TEXT."""
+    if not columns:
+        return set()
+    positions = set()
+    for index, column in enumerate(_split_sql_expressions(columns)):
+        if re.search(
+            r'\b(?:CHARACTER\s+VARYING|VARCHAR|CHARACTER|CHAR)\s*\(\s*(?:\*|\d+)\s*\)',
+            column, re.IGNORECASE,
+        ):
+            positions.add(index)
+    return positions
+
+
+def _cast_returns_table_text_outputs(sql: str, positions: set[int] | None = None) -> str:
+    """Cast result expressions to TEXT where the RETURNS TABLE contract requires it."""
+    contract = re.search(r'\bRETURNS\s+TABLE\s*\((.*?)\)\s*LANGUAGE\b', sql, re.IGNORECASE | re.DOTALL)
+    if not contract:
+        return sql
+    columns = _split_sql_expressions(contract.group(1))
+    if positions is None:
+        positions = {index for index, column in enumerate(columns) if re.search(r'\bTEXT\b', column, re.IGNORECASE)}
+    if not positions:
+        return sql
+
+    from result_metadata import _outer_select_spans
+    replacements = []
+    language_sql = bool(re.search(r'\bLANGUAGE\s+sql\b', sql, re.IGNORECASE))
+    for start, end in _outer_select_spans(sql):
+        prefix = sql[max(0, start - 100):start]
+        if not re.search(r'RETURN\s+QUERY\s+SELECT\s*$', prefix, re.IGNORECASE) and not language_sql:
+            continue
+        expressions = _split_sql_expressions(sql[start:end])
+        if len(expressions) != len(columns):
+            continue
+        changed = False
+        for position in positions:
+            if position < len(expressions):
+                casted = _cast_expression_to_text(expressions[position])
+                if casted != expressions[position]:
+                    expressions[position] = casted
+                    changed = True
+        if changed:
+            replacements.append((start, end, "\n    " + ",\n    ".join(expressions) + "\n"))
+    for start, end, replacement in reversed(replacements):
+        sql = sql[:start] + replacement + sql[end:]
+    return sql
+
+
+def _cast_expression_to_text(expression: str) -> str:
+    alias = re.search(r'\s+AS\s+("?[A-Za-z_]\w*"?)\s*$', expression, re.IGNORECASE)
+    value = expression[:alias.start()].strip() if alias else expression.strip()
+    suffix = f" AS {alias.group(1)}" if alias else ""
+    if re.search(r'::\s*TEXT\s*$', value, re.IGNORECASE) or re.match(r'^CAST\s*\(.*\s+AS\s+TEXT\s*\)$', value, re.IGNORECASE | re.DOTALL):
+        return value + suffix
+    if re.fullmatch(r'NULL', value, re.IGNORECASE):
+        return "NULL::TEXT" + suffix
+    return f"({value})::TEXT{suffix}"
+
+
+def _split_sql_expressions(text: str) -> list[str]:
+    parts, start, depth, quote = [], 0, 0, None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth = max(0, depth - 1)
+        elif char == ',' and depth == 0:
+            parts.append(text[start:index].strip())
+            start = index + 1
+        index += 1
+    parts.append(text[start:].strip())
+    return [part for part in parts if part]
 
 
 def _normalize_plpgsql_body(body: str) -> tuple[str, str]:

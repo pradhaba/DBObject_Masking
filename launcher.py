@@ -36,14 +36,14 @@ class Launcher:
         for key, title in (
             ("projects", "Projects"), ("settings", "Project Settings"),
             ("files", "Source Files"), ("migration", "Migration"),
-            ("skills", "Skill Studio"),
+            ("routine_test", "Routine Test Plan"), ("skills", "Skill Studio"),
         ):
             page = ttk.Frame(self.notebook)
             self.notebook.add(page, text=title)
             self.pages[key] = page
         self.page_canvases = {}
         self.page_containers = {}
-        for key in ("projects", "settings", "files", "skills"):
+        for key in ("projects", "settings", "files", "routine_test", "skills"):
             self._prepare_scrolled_page(key)
         self.container = self.page_containers["projects"]
         self.page_canvas = self.page_canvases["projects"]
@@ -93,6 +93,8 @@ class Launcher:
                         text="Select source files and choose Open workspace to start migration.",
                         padding=30,
                     ).pack(anchor=tk.NW)
+                elif key == "routine_test" and not self.container.winfo_children():
+                    self._empty_page("Routine Test Plan", "Migrate a procedure or function to generate its parameter test plan.")
                 break
 
     def _empty_page(self, title, message):
@@ -106,6 +108,116 @@ class Launcher:
             self.pages["migration"], selected, action, dialect, project,
             navigation=self,
         )
+
+    def prepare_routine_test_plan(self, project, source_sql, target_sql):
+        from routine_test_planner import build_routine_test_plan
+        self.routine_test_plan = build_routine_test_plan(source_sql, target_sql)
+        self._render_routine_test_plan(project)
+        self.notebook.tab(self.pages["routine_test"], text="Routine Test Plan *")
+        self.notebook.select(self.pages["migration"])
+
+    def _render_routine_test_plan(self, project):
+        from tkinter import simpledialog
+        from routine_test_planner import collect_data_findings, generate_invocation_sql
+        from workflow import cache_project_password, get_project_password, open_database_connection
+
+        self._activate("routine_test")
+        self.clear()
+        plan = self.routine_test_plan
+        self.heading("Routine Test Plan", f"Review generated inputs and data findings for {plan['routine_name']} before execution.")
+        mode=tk.StringVar(value=plan.get("validation_mode","compare_both"))
+        mode_frame=ttk.Labelframe(self.container,text="Validation mode",padding=10);mode_frame.pack(fill=tk.X)
+        ttk.Radiobutton(mode_frame,text="Compare source and destination results",variable=mode,value="compare_both").pack(anchor=tk.W)
+        ttk.Radiobutton(mode_frame,text="Destination only — datasets already verified equivalent",variable=mode,value="destination_only").pack(anchor=tk.W)
+        ttk.Label(mode_frame,text="Destination-only validates execution/results but does not prove source-to-target behavioral equivalence.",foreground="#9a6700").pack(anchor=tk.W,pady=(5,0))
+
+        ttk.Label(self.container,text="Parameters and suggested test values",font=("Segoe UI",11,"bold")).pack(anchor=tk.W,pady=(16,4))
+        suggestion_table=ttk.Treeview(self.container,columns=("parameter","kind","condition","values","source"),show="headings",height=8)
+        for key,label,width in (("parameter","Parameter",130),("kind","Finding",130),("condition","Condition",280),("values","Suggested values",190),("source","Value source",190)):
+            suggestion_table.heading(key,text=label);suggestion_table.column(key,width=width)
+        def refresh_suggestions():
+            for row in suggestion_table.get_children():suggestion_table.delete(row)
+            for index,item in enumerate(plan["suggestions"]):
+                values=", ".join("NULL" if value is None else str(value) for value in item.get("candidates",[])) or "Manual value required"
+                suggestion_table.insert("",tk.END,iid=str(index),values=(item["parameter"],item["kind"],item["condition"],values,item["source"]))
+        refresh_suggestions();suggestion_table.pack(fill=tk.X)
+        ttk.Label(self.container,text="Suggested PostgreSQL calls",font=("Segoe UI",11,"bold")).pack(anchor=tk.W,pady=(12,4))
+        invocation_text=tk.Text(self.container,height=6,wrap=tk.NONE)
+        invocation_text.pack(fill=tk.X)
+        def refresh_invocations():
+            invocation_text.config(state="normal");invocation_text.delete("1.0",tk.END)
+            invocation_text.insert("1.0","\n".join(generate_invocation_sql(plan)))
+            invocation_text.config(state="disabled")
+        refresh_invocations()
+        manual=ttk.Frame(self.container);manual.pack(fill=tk.X,pady=(5,10));manual_value=tk.StringVar()
+        ttk.Label(manual,text="Value for selected parameter:").pack(side=tk.LEFT)
+        ttk.Entry(manual,textvariable=manual_value,width=35).pack(side=tk.LEFT,padx=8)
+        def set_value():
+            chosen=suggestion_table.selection()
+            if not chosen:messagebox.showwarning("Routine Test Plan","Select a parameter suggestion first.");return
+            value=manual_value.get().strip()
+            if not value:messagebox.showwarning("Routine Test Plan","Enter a test value.");return
+            plan["suggestions"][int(chosen[0])]["candidates"]=[value];refresh_suggestions();refresh_invocations()
+        ttk.Button(manual,text="Set/override value",command=set_value).pack(side=tk.LEFT)
+
+        ttk.Label(self.container,text="Table data findings",font=("Segoe UI",11,"bold")).pack(anchor=tk.W,pady=(8,4))
+        table_tree=ttk.Treeview(self.container,columns=("table","source","target","status"),show="headings",height=7)
+        for key,label,width in (("table","Table",300),("source","Source data",120),("target","Target data",120),("status","Finding",160)):
+            table_tree.heading(key,text=label);table_tree.column(key,width=width)
+        def data_text(value):return "Not checked" if value is None else ("Empty" if value==0 else "Available")
+        def refresh_tables():
+            for row in table_tree.get_children():table_tree.delete(row)
+            for index,item in enumerate(plan["tables"]):
+                findings=[value for value in (item.get("source_status"),item.get("target_status")) if value]
+                table_tree.insert("",tk.END,iid=str(index),values=(item["name"],data_text(item.get("source_rows")),data_text(item.get("target_rows"))," / ".join(findings) or "not_checked"))
+        refresh_tables();table_tree.pack(fill=tk.X)
+        status=tk.StringVar(value="Database data has not been checked.");ttk.Label(self.container,textvariable=status,foreground="#555").pack(anchor=tk.W,pady=8)
+        results=ttk.Labelframe(self.container,text="Execution and comparison results",padding=10);results.pack(fill=tk.X,pady=(4,8))
+        result_status=tk.StringVar(value="Awaiting test-plan approval. No routine has been executed.")
+        ttk.Label(results,textvariable=result_status,foreground="#555").pack(anchor=tk.W)
+
+        def password_for(side):
+            password=get_project_password(project.id,side) or getattr(project,f"{side}_password",None)
+            if not password:
+                password=simpledialog.askstring("Database password",f"{side.title()} database password:",show="*",parent=self.root)
+                if password:cache_project_password(project.id,password,side)
+            return password
+        def check_data():
+            plan["validation_mode"]=mode.get();connections=[]
+            try:
+                sides=["target"] if mode.get()=="destination_only" else ["source","target"]
+                for side in sides:
+                    password=password_for(side)
+                    if password is None:return
+                    if side=="source":
+                        details={"host":project.host,"port":project.port,"database":project.database,"username":project.username};database_type=project.source_database
+                    else:
+                        details={"host":project.target_host,"port":project.target_port,"database":project.target_database_name,"username":project.target_username};database_type=project.target_database
+                    connection=open_database_connection(database_type,details,password);connections.append(connection)
+                    collect_data_findings(connection,plan,side)
+                refresh_tables();refresh_suggestions();refresh_invocations()
+                required=("target_rows",) if mode.get()=="destination_only" else ("source_rows","target_rows")
+                empty=[item["name"] for item in plan["tables"] if any(item.get(field) in {None,0} for field in required)]
+                status.set("Data check complete." if not empty else "Sample data required for: "+", ".join(empty))
+            except Exception as exc:messagebox.showerror("Routine Test Plan",str(exc))
+            finally:
+                for connection in connections:connection.close()
+        def approve():
+            plan["validation_mode"]=mode.get()
+            required=("target_rows",) if mode.get()=="destination_only" else ("source_rows","target_rows")
+            unavailable=[item["name"] for item in plan["tables"] if any(item.get(field) in {None,0} for field in required)]
+            missing_values=[item["parameter"] for item in plan["suggestions"] if not item.get("candidates")]
+            if unavailable:
+                messagebox.showerror("Routine Test Plan","Cannot approve: missing or empty table data for "+", ".join(unavailable));return
+            if missing_values:
+                messagebox.showerror("Routine Test Plan","Provide test values for: "+", ".join(sorted(set(missing_values))));return
+            plan["approved"]=True;self.notebook.tab(self.pages["routine_test"],text="Routine Test Plan")
+            status.set("Approved for routine execution. Parameter plan and data prerequisites passed.")
+            result_status.set("Approved and ready for the execution-and-comparison stage. No routine has been executed yet.")
+            messagebox.showinfo("Routine Test Plan","Test plan approved. It is ready for the execution-and-comparison stage.")
+        actions=ttk.Frame(self.container);actions.pack(fill=tk.X,pady=10)
+        ttk.Button(actions,text="Check table data and derive values",command=check_data).pack(side=tk.LEFT)
+        ttk.Button(actions,text="Approve test plan",command=approve).pack(side=tk.LEFT,padx=8)
 
     def _scroll_page(self, event):
         try:

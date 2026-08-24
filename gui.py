@@ -70,6 +70,8 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         )
         if run_context is not None:
             run_context.update(run_id=run_id, skill_version_id=skill['id'], output=migrated_text)
+        if project is not None and run_context is not None and run_context.get('test_plan_callback'):
+            run_context['test_plan_callback'](project, ddl_text, migrated_text)
         messagebox.showinfo(
             'Migration',
             f"Migration completed with skill: {skill['name']} v{skill['version']}\n"
@@ -224,6 +226,13 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     object_var = None
     target_routine_var = tk.StringVar(value='auto')
     run_context = {}
+    if navigation is not None:
+        run_context['test_plan_callback'] = navigation.prepare_routine_test_plan
+    def reset_run_context():
+        callback = run_context.get('test_plan_callback')
+        run_context.clear()
+        if callback is not None:
+            run_context['test_plan_callback'] = callback
 
     if initial_files:
         ttk.Label(control_frame, text='Selected object:').grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
@@ -259,7 +268,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
             values=('auto', 'function', 'procedure'), state='readonly', width=14,
         )
         target_routine_box.grid(row=1, column=6, sticky=tk.W, pady=(10, 0))
-        target_routine_box.bind('<<ComboboxSelected>>', lambda _e: (run_context.clear(), clear_results(target_text, mapping_text, skill_text)))
+        target_routine_box.bind('<<ComboboxSelected>>', lambda _e: (reset_run_context(), clear_results(target_text, mapping_text, skill_text)))
 
     ttk.Label(control_frame, text='Mode:').grid(row=0, column=0, sticky=tk.W)
     mode_box = ttk.Combobox(
@@ -273,7 +282,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
             return
         from workflow import save_projects, load_projects
         project.default_operation = mode_var.get()
-        run_context.clear()
+        reset_run_context()
         clear_results(target_text, mapping_text, skill_text)
         projects = load_projects()
         for index, item in enumerate(projects):
@@ -297,7 +306,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         from workflow import load_projects, save_projects
         project.source_database = source_dialect_var.get()
         project.target_database = target_dialect_var.get()
-        run_context.clear()
+        reset_run_context()
         clear_results(target_text, mapping_text, skill_text)
         projects = load_projects()
         for index, item in enumerate(projects):
