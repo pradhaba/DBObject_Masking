@@ -13,6 +13,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                  target_override="auto", metadata_connection=None, formatter_indent="4 spaces"):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     text = _strip_sql_comments(text)
+    _validate_sql_quoted_tokens(text)
     if source_dialect == "sybase_asa" and not re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\b", text, re.IGNORECASE):
         raise ValueError("The active SAP ASA skill currently supports procedures only.")
     if database_path is None:
@@ -143,6 +144,33 @@ def _strip_sql_comments(text: str) -> str:
     return ''.join(output)
 
 
+def _validate_sql_quoted_tokens(text: str) -> None:
+    """Fail early when a SQL string or quoted identifier is not terminated."""
+    quote = None
+    quote_start = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(text) and text[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+                quote_start = None
+        elif char in ("'", '"'):
+            quote = char
+            quote_start = index
+        index += 1
+    if quote is None:
+        return
+    line = text.count('\n', 0, quote_start) + 1
+    previous_newline = text.rfind('\n', 0, quote_start)
+    column = quote_start - previous_newline
+    token = 'string literal' if quote == "'" else 'double-quoted identifier'
+    raise ValueError(f"Unterminated {token} at line {line}, column {column}.")
+
+
 def _is_already_masked(text: str) -> bool:
     """Recognize standalone masked DDL so it is not masked a second time."""
     declared = re.search(
@@ -229,7 +257,7 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
     used: set[str] = set()
     aliases: dict[str, str] = {}
     changes = 0
-    reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET)"
+    reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET|END|ELSE|ELSIF|EXCEPTION)"
     relation = re.compile(
         rf"(?P<prefix>(?:\b(?:FROM|JOIN)\s+|,\s*))(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))(?!\s*\.)"
         rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)[A-Za-z_]\w*))?",

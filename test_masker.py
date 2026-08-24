@@ -658,6 +658,27 @@ $$;'''
         self.assertNotIn('remove', cleaned)
         self.assertEqual(cleaned.count('\n'), source.count('\n'))
 
+    def test_unterminated_quoted_identifier_reports_source_location(self):
+        from migration_engine import migrate_text
+        source = '''CREATE PROCEDURE dba.p()
+BEGIN
+SELECT t."broken
+FROM dba.t
+END'''
+        with self.assertRaisesRegex(ValueError, r'Unterminated double-quoted identifier at line 3, column 10'):
+            migrate_text(source, 'sybase_asa', 'postgresql')
+
+    def test_end_keyword_is_not_used_as_an_implicit_table_alias(self):
+        from migration_engine import _apply_table_alias_policy
+        mapping = {'tables': {'mailmerge_sets': 'TBL_1'}}
+        rendered, _ = _apply_table_alias_policy(
+            'SELECT TBL_1.COL_1 FROM dba.TBL_1\nEND',
+            '{"alias_length": 3}',
+            mapping,
+        )
+        self.assertIn('FROM dba.TBL_1 AS mas\nEND', rendered)
+        self.assertNotIn('AS END', rendered)
+
     def test_grouped_filters_and_scalar_subquery_do_not_become_join_conditions(self):
         from migration_engine import _convert_comma_tables_to_joins
         sql = '''FROM TBL_5 AS tre, TBL_1 AS head, TBL_4 AS sta, TBL_3 AS pro, TBL_6 AS wtl
