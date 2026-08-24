@@ -144,7 +144,46 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
 
     while output and output[-1] == "":
         output.pop()
-    return "\n".join(output) + "\n"
+    return "\n".join(_use_leading_select_commas(output)) + "\n"
+
+
+def _use_leading_select_commas(lines: list[str]) -> list[str]:
+    """Move top-level SELECT-list delimiters to the following column line."""
+    formatted = list(lines)
+    in_select_list = False
+    depth = 0
+    comma_pending = False
+
+    for index, line in enumerate(formatted):
+        stripped = line.strip()
+        if re.fullmatch(r"SELECT", stripped, re.IGNORECASE):
+            in_select_list = True
+            depth = 0
+            comma_pending = False
+            continue
+        if not in_select_list:
+            continue
+        if depth == 0 and re.match(r"FROM\b", stripped, re.IGNORECASE):
+            in_select_list = False
+            comma_pending = False
+            continue
+        if not stripped:
+            continue
+
+        leading = line[:len(line) - len(line.lstrip())]
+        content = line.lstrip()
+        if comma_pending:
+            content = ", " + content
+            comma_pending = False
+
+        next_depth = max(0, depth + _parenthesis_delta(content))
+        if next_depth == 0 and content.rstrip().endswith(","):
+            content = content.rstrip()[:-1].rstrip()
+            comma_pending = True
+        formatted[index] = leading + content
+        depth = next_depth
+
+    return formatted
 
 
 def _parenthesis_delta(line: str) -> int:

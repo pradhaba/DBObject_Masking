@@ -454,6 +454,35 @@ $$;'''
         self.assertIn('\n  IF true THEN\n', two_spaces)
         self.assertIn('\n\tIF true THEN\n', tabs)
 
+    def test_postgresql_formatter_uses_leading_select_list_commas(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''CREATE OR REPLACE FUNCTION dba.f()
+RETURNS TABLE (
+column1 INTEGER,
+column2 TEXT,
+column3 TEXT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+RETURN QUERY
+SELECT
+t.column1,
+(t.first_name || t.last_name),
+t.column3
+FROM dba.people AS t;
+END;
+$$;'''
+        formatted = format_postgresql_routine(source, '4 spaces')
+        self.assertIn(
+            'SELECT\n'
+            '        t.column1\n'
+            '        , (t.first_name || t.last_name)\n'
+            '        , t.column3\n'
+            '    FROM',
+            formatted,
+        )
+
     def test_dynamic_temp_report_uses_static_parameterized_branches(self):
         from dynamic_temp_renderer import render_dynamic_temp_report, supports_dynamic_temp_report
         rendered = render_dynamic_temp_report()
