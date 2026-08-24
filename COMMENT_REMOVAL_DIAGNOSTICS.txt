@@ -51,3 +51,5 @@ Notes
 
 Get-Process python,pythonw -ErrorAction SilentlyContinue | Stop-Process
 .\.venv\Scripts\python.exe gui.py
+
+git stash push data/ddl_masker.sqlite3
