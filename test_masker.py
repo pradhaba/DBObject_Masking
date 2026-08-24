@@ -519,6 +519,24 @@ $$;'''
             formatted,
         )
 
+    def test_postgresql_formatter_normalizes_dba_schema_without_changing_literals(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''CREATE OR REPLACE FUNCTION "dba".f()
+RETURNS TABLE (
+value TEXT
+)
+LANGUAGE sql
+AS $$
+SELECT
+t.value
+FROM dba.items AS t
+WHERE t.note = 'keep "dba".items and dba.items literal';
+$$;'''
+        formatted = format_postgresql_routine(source)
+        self.assertIn('FUNCTION dba.f()', formatted)
+        self.assertIn('FROM dba.items AS t', formatted)
+        self.assertIn("'keep \"dba\".items and dba.items literal'", formatted)
+
     def test_dynamic_temp_report_uses_static_parameterized_branches(self):
         from dynamic_temp_renderer import render_dynamic_temp_report, supports_dynamic_temp_report
         rendered = render_dynamic_temp_report()

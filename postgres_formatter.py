@@ -145,7 +145,38 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
     while output and output[-1] == "":
         output.pop()
     output = _use_leading_declaration_commas(output)
-    return "\n".join(_use_leading_select_commas(output)) + "\n"
+    formatted = "\n".join(_use_leading_select_commas(output)) + "\n"
+    return _normalize_dba_schema_qualifier(formatted)
+
+
+def _normalize_dba_schema_qualifier(sql: str) -> str:
+    """Render the dba schema as an unquoted lowercase identifier outside literals."""
+    output = []
+    index = 0
+    segment_start = 0
+    while index < len(sql):
+        if sql[index] != "'":
+            index += 1
+            continue
+        output.append(_replace_dba_qualifier(sql[segment_start:index]))
+        literal_start = index
+        index += 1
+        while index < len(sql):
+            if sql[index] == "'":
+                if index + 1 < len(sql) and sql[index + 1] == "'":
+                    index += 2
+                    continue
+                index += 1
+                break
+            index += 1
+        output.append(sql[literal_start:index])
+        segment_start = index
+    output.append(_replace_dba_qualifier(sql[segment_start:]))
+    return "".join(output)
+
+
+def _replace_dba_qualifier(text: str) -> str:
+    return re.sub(r'(?<![A-Za-z0-9_])(?:"dba"|dba)\s*\.', 'dba.', text, flags=re.IGNORECASE)
 
 
 def _use_leading_declaration_commas(lines: list[str]) -> list[str]:
