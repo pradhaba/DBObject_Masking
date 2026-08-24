@@ -64,13 +64,12 @@ END;'''
                 review_skill_rule(rule['id'], 'approved', 'test', path)
             approve_skill_version(candidate['id'], 'tester', path)
             migrated, _, _ = migrate_text(sql, 'sybase_asa', 'postgresql', path)
-        self.assertIn('RETURNS TABLE (\n    mailmerge_set_id int,', migrated)
-        self.assertIn('mailmerge_set_name TEXT,', migrated)
-        self.assertIn('mailmerge_category_id int,', migrated)
-        self.assertIn('date_column_name TEXT\n)', migrated)
+        self.assertIn('RETURNS TABLE (\n    mailmerge_set_id int', migrated)
+        self.assertIn('\n    , mailmerge_set_name TEXT', migrated)
+        self.assertIn('\n    , mailmerge_category_id int', migrated)
+        self.assertIn('\n    , date_column_name TEXT\n)', migrated)
         self.assertIn('LANGUAGE sql', migrated)
         self.assertNotIn('RETURN QUERY SELECT 1', migrated)
-        self.assertNotIn('\n,\n    mailmerge_category_id', migrated)
 
     def test_nested_select_in_where_is_not_return_query(self):
         from migration_engine import _convert_top_level_result_selects
@@ -480,6 +479,43 @@ $$;'''
             '        , (t.first_name || t.last_name)\n'
             '        , t.column3\n'
             '    FROM',
+            formatted,
+        )
+
+    def test_postgresql_formatter_uses_leading_parameter_and_return_commas(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''CREATE OR REPLACE FUNCTION dba.f(
+IN p_id INTEGER,
+IN p_amount NUMERIC(20,4),
+IN p_name TEXT
+)
+RETURNS TABLE (
+item_id INTEGER,
+amount NUMERIC(20,4),
+item_name TEXT
+)
+LANGUAGE sql
+AS $$
+SELECT
+p_id,
+p_amount,
+p_name;
+$$;'''
+        formatted = format_postgresql_routine(source)
+        self.assertIn(
+            'CREATE OR REPLACE FUNCTION dba.f(\n'
+            '    IN p_id INTEGER\n'
+            '    , IN p_amount NUMERIC(20,4)\n'
+            '    , IN p_name TEXT\n'
+            ')',
+            formatted,
+        )
+        self.assertIn(
+            'RETURNS TABLE (\n'
+            '    item_id INTEGER\n'
+            '    , amount NUMERIC(20,4)\n'
+            '    , item_name TEXT\n'
+            ')',
             formatted,
         )
 

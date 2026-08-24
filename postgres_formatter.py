@@ -144,7 +144,45 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
 
     while output and output[-1] == "":
         output.pop()
+    output = _use_leading_declaration_commas(output)
     return "\n".join(_use_leading_select_commas(output)) + "\n"
+
+
+def _use_leading_declaration_commas(lines: list[str]) -> list[str]:
+    """Use leading commas for routine parameters and RETURNS TABLE columns."""
+    formatted = list(lines)
+    in_declarations = False
+    comma_pending = False
+
+    for index, line in enumerate(formatted):
+        stripped = line.strip()
+        if (
+            re.match(r"CREATE\s+OR\s+REPLACE\s+(?:FUNCTION|PROCEDURE)\b", stripped, re.IGNORECASE)
+            and stripped.endswith("(")
+        ) or re.fullmatch(r"RETURNS\s+TABLE\s*\(", stripped, re.IGNORECASE):
+            in_declarations = True
+            comma_pending = False
+            continue
+        if not in_declarations:
+            continue
+        if stripped == ")":
+            in_declarations = False
+            comma_pending = False
+            continue
+        if not stripped:
+            continue
+
+        leading = line[:len(line) - len(line.lstrip())]
+        content = line.lstrip()
+        if comma_pending:
+            content = ", " + content
+            comma_pending = False
+        if content.rstrip().endswith(","):
+            content = content.rstrip()[:-1].rstrip()
+            comma_pending = True
+        formatted[index] = leading + content
+
+    return formatted
 
 
 def _use_leading_select_commas(lines: list[str]) -> list[str]:
