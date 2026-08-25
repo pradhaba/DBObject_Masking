@@ -682,6 +682,46 @@ $$;'''
             ('provider_id', 'integer'),
         )
 
+    def test_metadata_resolver_uses_internal_function_return_type(self):
+        from result_metadata import _resolve_expression
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, query, params):
+                self.query = query
+                self.params = params
+            def fetchone(self):
+                if 'pg_attribute' in self.query and self.params == ('dba', 'reports', 'report_code'):
+                    return ('character varying(25)',)
+                return None
+            def fetchall(self):
+                if 'pg_proc' in self.query and self.params == ('dba', 'w3_get_report_name', 1):
+                    return [('text', [1043], ['character varying'], 'character varying', False)]
+                return []
+        class Connection:
+            def cursor(self): return Cursor()
+        resolved = _resolve_expression(
+            'w3_get_report_name("report_code") AS "original_report_name"',
+            Connection(), {}, 'dba', [('dba', 'reports', 'reports')],
+        )
+        self.assertEqual(resolved, ('original_report_name', 'text'))
+
+    def test_metadata_resolver_knows_nested_asa_string_return_type(self):
+        from result_metadata import _resolve_expression
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _query, params): self.params = params
+            def fetchone(self):
+                return ('character varying(25)',) if self.params == ('dba', 'reports', 'report_code') else None
+        class Connection:
+            def cursor(self): return Cursor()
+        resolved = _resolve_expression(
+            "string('REPORT_', reports.report_code)",
+            Connection(), {}, 'dba', [('dba', 'reports', 'reports')],
+        )
+        self.assertEqual(resolved, ('string', 'text'))
+
     def test_result_metadata_qualifies_unique_unqualified_result_columns(self):
         from result_metadata import qualify_unqualified_result_columns
         columns = {

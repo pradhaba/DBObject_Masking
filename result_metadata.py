@@ -18,7 +18,7 @@ def infer_returns_table(sql: str, connection, default_schema: str = "dba") -> st
     select_contexts = _outer_select_contexts(sql, default_schema)
     if not select_contexts:
         raise ValueError("No result-producing SELECT was found for RETURNS TABLE inference.")
-    parameters = _parameter_types(sql)
+    parameters = _declared_symbol_types(sql)
     contracts = [
         [_resolve_expression(item, connection, parameters, default_schema, sources) for item in _split_sql_list(body)]
         for body, sources in select_contexts
@@ -246,10 +246,21 @@ def _parameter_types(sql: str) -> dict[str, str]:
         return {}
     result = {}
     for item in _split_sql_list(declaration.group(1)):
-        match = re.match(rf'\s*(?:IN|OUT|INOUT)?\s*(?P<name>{IDENT})\s+(?P<type>{IDENT}(?:\s*\([^)]*\))?)', item, re.IGNORECASE)
+        match = re.match(rf'\s*(?:IN|OUT|INOUT)?\s*@?(?P<name>{IDENT})\s+(?P<type>{IDENT}(?:\s*\([^)]*\))?)', item, re.IGNORECASE)
         if match:
             result[match.group('name').lower()] = _normalize_declared_type(match.group('type'))
     return result
+
+
+def _declared_symbol_types(sql: str) -> dict[str, str]:
+    symbols = _parameter_types(sql)
+    for match in re.finditer(
+        rf'\bDECLARE\s+@?(?P<name>{IDENT})\s+(?P<type>{IDENT}(?:\s*\([^)]*\))?)',
+        sql,
+        re.IGNORECASE,
+    ):
+        symbols[match.group('name').lower()] = _normalize_declared_type(match.group('type'))
+    return symbols
 
 
 def _normalize_declared_type(value: str) -> str:
@@ -266,6 +277,19 @@ def _resolve_expression(expression: str, connection, parameters: dict, default_s
     parameter = re.fullmatch(IDENT, value)
     if parameter and parameter.group(0).lower() in parameters:
         return output_name or parameter.group(0), parameters[parameter.group(0).lower()]
+    asa_symbol = re.fullmatch(rf'@(?P<name>{IDENT})', value)
+    if asa_symbol and asa_symbol.group('name').lower() in parameters:
+        name = asa_symbol.group('name')
+        return output_name or name, parameters[name.lower()]
+
+    if re.fullmatch(r"'(?:''|[^'])*'", value, re.DOTALL) or re.fullmatch(r'NULL', value, re.IGNORECASE):
+        return output_name or 'value', 'unknown'
+    if re.fullmatch(r'[+-]?\d+', value):
+        return output_name or 'value', 'integer'
+    if re.fullmatch(r'[+-]?(?:\d+\.\d*|\d*\.\d+)', value):
+        return output_name or 'value', 'numeric'
+    if re.fullmatch(r'(?:TRUE|FALSE)', value, re.IGNORECASE):
+        return output_name or 'value', 'boolean'
 
     unqualified = re.fullmatch(SQL_IDENT, value)
     if unqualified and source_tables:
@@ -276,6 +300,32 @@ def _resolve_expression(expression: str, connection, parameters: dict, default_s
         matching_type = _unique_source_column_type(connection, source_tables, output_name, required=False)
         if matching_type:
             return output_name, matching_type
+
+    function_call = re.fullmatch(
+        rf'(?:(?P<schema>{SQL_IDENT})\.)?(?P<function>{SQL_IDENT})\s*\((?P<arguments>.*)\)',
+        value,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if function_call:
+        schema = (_unquote_identifier(function_call.group('schema'))
+                  if function_call.group('schema') else default_schema)
+        function = _unquote_identifier(function_call.group('function'))
+        argument_text = function_call.group('arguments').strip()
+        arguments = _split_sql_list(argument_text) if argument_text else []
+        argument_types = []
+        for argument in arguments:
+            try:
+                argument_types.append(
+                    _resolve_expression(argument, connection, parameters, default_schema, source_tables)[1]
+                )
+            except ValueError as exc:
+                if not str(exc).startswith('Cannot infer a datatype for result expression:'):
+                    raise
+                argument_types.append('unknown')
+        builtin_type = _source_builtin_return_type(function, argument_types) if not function_call.group('schema') else None
+        if builtin_type:
+            return output_name or function, builtin_type
+        return output_name or function, _function_return_type(connection, schema, function, argument_types)
 
     scalar = re.search(
         rf'\bSELECT\s+(?P<qual>{SQL_IDENT})\.(?P<column>{SQL_IDENT})\s+FROM\s+'
@@ -338,3 +388,107 @@ def _find_column_type(connection, schema: str, table: str, column: str) -> str |
         )
         row = cursor.fetchone()
     return row[0] if row else None
+
+
+def _function_return_type(connection, schema: str, function: str, argument_types: list[str]) -> str:
+    """Resolve a destination PostgreSQL function overload and return its declared type."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """SELECT pg_catalog.format_type(p.prorettype, NULL),
+                      p.proargtypes::oid[],
+                      ARRAY(
+                          SELECT pg_catalog.format_type(arg_type, NULL)
+                          FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS args(arg_type, position)
+                          ORDER BY position
+                      ),
+                      pg_catalog.pg_get_function_identity_arguments(p.oid),
+                      p.proretset
+               FROM pg_catalog.pg_proc p
+               JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+               WHERE lower(n.nspname) = lower(%s)
+                 AND lower(p.proname) = lower(%s)
+                 AND %s BETWEEN (p.pronargs - p.pronargdefaults) AND p.pronargs""",
+            (schema, function, len(argument_types)),
+        )
+        candidates = cursor.fetchall()
+    signature = f"{schema}.{function}({', '.join(argument_types)})"
+    if not candidates:
+        raise ValueError(f"PostgreSQL function metadata not found for {signature}.")
+
+    exact = [candidate for candidate in candidates
+             if _function_arguments_match(argument_types, candidate[2])]
+    compatible = exact or [
+        candidate for candidate in candidates
+        if _function_arguments_implicitly_castable(connection, argument_types, candidate[1])
+    ]
+    if not compatible:
+        available = '; '.join(candidate[3] or '(no arguments)' for candidate in candidates)
+        raise ValueError(
+            f"No compatible PostgreSQL overload found for {signature}. Available arguments: {available}."
+        )
+    if len(compatible) > 1:
+        available = '; '.join(candidate[3] or '(no arguments)' for candidate in compatible)
+        raise ValueError(f"Ambiguous PostgreSQL function overload for {signature}: {available}.")
+    return_type, _arg_oids, _arg_names, identity_arguments, returns_set = compatible[0]
+    if returns_set:
+        raise ValueError(
+            f"Set-returning PostgreSQL function {schema}.{function}({identity_arguments}) "
+            "cannot be inferred as one scalar result expression."
+        )
+    return return_type
+
+
+def _source_builtin_return_type(function: str, argument_types: list[str]) -> str | None:
+    """Types for ASA built-ins that are rewritten before PostgreSQL deployment."""
+    name = function.lower()
+    if name in {'string', 'list'}:
+        return 'text'
+    if name in {'len', 'length', 'char_length'}:
+        return 'integer'
+    if name in {'lower', 'upper', 'trim', 'ltrim', 'rtrim'}:
+        return 'text'
+    if name in {'coalesce', 'isnull'}:
+        return next((data_type for data_type in argument_types if data_type != 'unknown'), 'unknown')
+    return None
+
+
+def _function_arguments_match(actual: list[str], declared: list[str]) -> bool:
+    if len(actual) > len(declared):
+        return False
+    return all(left.lower() == 'unknown' or _canonical_type(left) == _canonical_type(right)
+               for left, right in zip(actual, declared))
+
+
+def _canonical_type(value: str) -> str:
+    normalized = re.sub(r'\s+', ' ', value.strip().lower())
+    normalized = re.sub(r'\([^)]*\)$', '', normalized).strip()
+    aliases = {
+        'int': 'integer', 'int4': 'integer', 'int2': 'smallint', 'int8': 'bigint',
+        'varchar': 'character varying', 'decimal': 'numeric', 'bool': 'boolean',
+        'timestamp without time zone': 'timestamp',
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _function_arguments_implicitly_castable(connection, actual: list[str], declared_oids: list[int]) -> bool:
+    if len(actual) > len(declared_oids):
+        return False
+    for actual_type, declared_oid in zip(actual, declared_oids):
+        if actual_type.lower() == 'unknown':
+            continue
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT source.oid = %s OR EXISTS (
+                           SELECT 1 FROM pg_catalog.pg_cast cast
+                           WHERE cast.castsource = source.oid
+                             AND cast.casttarget = %s
+                             AND cast.castcontext = 'i'
+                       )
+                   FROM pg_catalog.pg_type source
+                   WHERE source.oid = pg_catalog.to_regtype(%s)""",
+                (declared_oid, declared_oid, actual_type),
+            )
+            row = cursor.fetchone()
+        if not row or not row[0]:
+            return False
+    return True
