@@ -31,9 +31,9 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual(skill['source_dialect'], 'sybase_asa')
         self.assertIn('Customer', mapping['procedures'])
 
-    def test_asa_skill_rejects_non_procedure_objects(self):
+    def test_asa_skill_rejects_non_routine_objects(self):
         from migration_engine import migrate_text
-        with self.assertRaisesRegex(ValueError, 'procedures only'):
+        with self.assertRaisesRegex(ValueError, 'procedures and functions only'):
             migrate_text('CREATE TABLE Customer (id int);', 'sybase_asa', 'postgresql')
 
     def test_postgresql_routine_classification(self):
@@ -41,6 +41,40 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p() BEGIN COMMIT; END')[0], 'procedure')
         self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p(OUT result integer) BEGIN END')[0], 'procedure')
         self.assertEqual(classify_postgresql_routine('CREATE PROCEDURE p() BEGIN SELECT value FROM t; END')[0], 'function')
+
+    def test_explicit_asa_function_is_classified_as_postgresql_function(self):
+        from migration_engine import classify_postgresql_routine
+        target, _reason, rule = classify_postgresql_routine(
+            'CREATE FUNCTION dba.f(p_id integer) RETURNS integer BEGIN RETURN p_id; END;'
+        )
+        self.assertEqual(target, 'function')
+        self.assertEqual(rule, 'source-function')
+
+    def test_scalar_asa_function_preserves_return_type_and_return_statement(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE FUNCTION dba.FUNC_1(IN PARAM_1 VARCHAR(20)) RETURNS VARCHAR(50)
+BEGIN
+RETURN PARAM_1;
+END;'''
+        rendered, _trace, language = render_postgresql_routine(source, 'function')
+        self.assertIn('CREATE OR REPLACE FUNCTION dba.FUNC_1(IN PARAM_1 VARCHAR(20))', rendered)
+        self.assertIn('RETURNS TEXT', rendered)
+        self.assertIn('RETURN PARAM_1;', rendered)
+        self.assertNotIn('RETURNS SETOF RECORD', rendered)
+        self.assertEqual(language, 'plpgsql')
+
+    def test_table_returning_asa_function_uses_result_contract(self):
+        from migration_engine import render_postgresql_routine
+        source = '''CREATE FUNCTION dba.FUNC_1()
+RESULT (item_id INTEGER, item_name VARCHAR(40))
+BEGIN
+SELECT TBL_1.COL_1, TBL_1.COL_2 FROM TBL_1;
+END;'''
+        rendered, _trace, language = render_postgresql_routine(source, 'function')
+        self.assertIn('RETURNS TABLE (', rendered)
+        self.assertIn('item_name TEXT', rendered)
+        self.assertIn('SELECT', rendered)
+        self.assertEqual(language, 'sql')
 
     def test_result_clause_keeps_nested_datatype_parentheses(self):
         import tempfile

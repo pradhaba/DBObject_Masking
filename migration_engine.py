@@ -14,8 +14,10 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     text = _strip_sql_comments(text)
     _validate_sql_quoted_tokens(text)
-    if source_dialect == "sybase_asa" and not re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\b", text, re.IGNORECASE):
-        raise ValueError("The active SAP ASA skill currently supports procedures only.")
+    if source_dialect == "sybase_asa" and not re.search(
+        r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROC(?:EDURE)?|FUNCTION)\b", text, re.IGNORECASE
+    ):
+        raise ValueError("The active SAP ASA skill supports procedures and functions only.")
     if database_path is None:
         skill = get_active_skill_version(source_dialect, target_dialect)
     else:
@@ -51,9 +53,10 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     else:
         dynamic_inline_count = 0
     working_text = text
+    source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
-        if metadata_connection is not None:
+        if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
         working_text = align_result_selects(working_text)
     if _is_already_masked(working_text):
@@ -64,7 +67,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
     inferred_result_columns = None
-    if target_type == "function" and target_dialect == "postgresql" and metadata_connection is not None:
+    if (target_type == "function" and target_dialect == "postgresql"
+            and metadata_connection is not None and source_scalar_return_type is None):
         from result_metadata import infer_returns_table
         inferred_result_columns = infer_returns_table(working_text, metadata_connection)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
@@ -650,6 +654,8 @@ def classify_postgresql_routine(text: str, override="auto") -> tuple[str, str, s
     """Choose a PostgreSQL routine type using explicit, auditable criteria."""
     if override in {"function", "procedure"}:
         return override, f"Human/project override selected PostgreSQL {override}.", "human-override"
+    if re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b", text, re.IGNORECASE):
+        return "function", "Source object is explicitly declared as a function.", "source-function"
     analysis = analyze_asa_procedure(text)
     if analysis["transaction_control"]:
         return "procedure", "Source routine controls transactions.", "transaction-control-procedure"
@@ -663,17 +669,21 @@ def classify_postgresql_routine(text: str, override="auto") -> tuple[str, str, s
 
 
 def render_postgresql_routine(masked_text: str, target_type: str, inferred_result_columns: str | None = None):
-    """Render a masked ASA procedure as a PostgreSQL PL/pgSQL routine."""
-    match = re.search(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?PROC(?:EDURE)?\s+(?P<name>[\w.$\"\[\]]+)", masked_text, re.IGNORECASE)
+    """Render a masked ASA procedure or function as a PostgreSQL routine."""
+    match = re.search(
+        r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?P<kind>PROC(?:EDURE)?|FUNCTION)\s+"
+        r"(?P<name>[\w.$\"\[\]]+)", masked_text, re.IGNORECASE,
+    )
     if not match:
-        raise ValueError("Unable to locate the ASA procedure declaration for PostgreSQL rendering.")
+        raise ValueError("Unable to locate the ASA procedure or function declaration for PostgreSQL rendering.")
     begin = re.search(r"\bBEGIN\b", masked_text[match.end():], re.IGNORECASE)
     if not begin:
-        raise ValueError("Unable to locate the ASA procedure BEGIN block.")
+        raise ValueError("Unable to locate the ASA routine BEGIN block.")
     begin_at = match.end() + begin.start()
     header_tail = masked_text[match.end():begin_at]
     header_tail = re.sub(r"\bAS\s*$", "", header_tail, flags=re.IGNORECASE).strip()
     header_tail, result_columns = _extract_result_clause(header_tail)
+    header_tail, scalar_return_type = _extract_scalar_returns_clause(header_tail)
     params = header_tail if header_tail.startswith("(") else f"({header_tail.strip().strip(',')})"
     body = masked_text[begin_at:].strip()
     body = re.sub(r";?\s*$", "", body)
@@ -682,14 +692,21 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
     if target_type == "function":
         raw_table_columns = result_columns or inferred_result_columns
         table_columns = _normalize_returns_table_types(raw_table_columns)
-        returns = f"RETURNS TABLE (\n    {table_columns}\n)" if table_columns else "RETURNS SETOF RECORD"
-        simple_select = _simple_select_body(body)
+        normalized_scalar_type = _normalize_scalar_return_type(scalar_return_type)
+        if table_columns:
+            returns = f"RETURNS TABLE (\n    {table_columns}\n)"
+        elif normalized_scalar_type:
+            returns = f"RETURNS {normalized_scalar_type}"
+        else:
+            returns = "RETURNS SETOF RECORD"
+        simple_select = None if normalized_scalar_type else _simple_select_body(body)
         if simple_select is not None:
             rendered = f"CREATE OR REPLACE FUNCTION {name}{params}\n{returns}\nLANGUAGE sql\nAS $$\n{simple_select.rstrip(';')};\n$$;"
             renderer = "postgresql-sql-function-renderer"
             routine_language = "sql"
         else:
-            body = _convert_top_level_result_selects(body)
+            if not normalized_scalar_type:
+                body = _convert_top_level_result_selects(body)
             declarations, body = _normalize_plpgsql_body(body)
             body = _terminate_return_queries(body)
             declare_block = f"DECLARE\n{declarations}\n" if declarations else ""
@@ -896,6 +913,7 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     # The renderer owns the dollar-quoted routine wrapper, so its final PL/pgSQL
     # END must carry the semicolon inside that wrapper.
     normalized_body = re.sub(r'(?im)^(?P<indent>\s*)END\s*$', r'\g<indent>END;', normalized_body)
+    normalized_body = re.sub(r'\bEND\s*$', 'END;', normalized_body, flags=re.IGNORECASE)
     return "\n".join(declarations), normalized_body
 
 
@@ -1053,3 +1071,39 @@ def _extract_result_clause(header: str) -> tuple[str, str]:
     columns = header[open_at + 1:close_at].strip()
     remaining = (header[:result.start()] + header[close_at + 1:]).strip()
     return remaining, columns
+
+
+def _extract_scalar_returns_clause(header: str) -> tuple[str, str | None]:
+    """Remove a scalar ASA RETURNS clause from a routine header."""
+    returns = re.search(r'\bRETURNS\b', header, re.IGNORECASE)
+    if returns is None:
+        return header, None
+    declared = header[returns.end():].strip()
+    if not declared or re.match(r'(?:TABLE|SETOF)\b', declared, re.IGNORECASE):
+        return header, None
+    return header[:returns.start()].strip(), declared
+
+
+def _source_scalar_return_type(text: str) -> str | None:
+    """Read an explicitly declared scalar return type from an ASA function."""
+    declaration = re.search(
+        r'\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+[\w.$"\[\]]+', text, re.IGNORECASE
+    )
+    if declaration is None:
+        return None
+    begin = re.search(r'\bBEGIN\b', text[declaration.end():], re.IGNORECASE)
+    if begin is None:
+        return None
+    header = text[declaration.end():declaration.end() + begin.start()]
+    header, _result_columns = _extract_result_clause(header)
+    _remaining, scalar_type = _extract_scalar_returns_clause(header)
+    return scalar_type
+
+
+def _normalize_scalar_return_type(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = re.sub(r'\bLONG\s+VARCHAR\b', 'TEXT', value.strip(), flags=re.IGNORECASE)
+    normalized = _normalize_returns_table_types(normalized)
+    normalized = re.sub(r'\bDATETIME\b', 'TIMESTAMP', normalized, flags=re.IGNORECASE)
+    return normalized
