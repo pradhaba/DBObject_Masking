@@ -167,6 +167,12 @@ RUN_COLUMNS = {
     "human_override": "TEXT",
     "routine_analysis_json": "TEXT",
     "routine_language": "TEXT",
+    "technical_status": "TEXT NOT NULL DEFAULT 'success'",
+    "review_status": "TEXT NOT NULL DEFAULT 'pending_review'",
+    "diagnostics_json": "TEXT NOT NULL DEFAULT '[]'",
+    "reviewed_by": "TEXT",
+    "reviewed_at": "TEXT",
+    "review_notes": "TEXT NOT NULL DEFAULT ''",
 }
 RULE_COLUMNS = {
     "description": "TEXT NOT NULL DEFAULT ''",
@@ -1030,12 +1036,13 @@ def record_processing(project_id: str | None, object_path: str, operation: str, 
                       path: Path = DATABASE_PATH, source_dialect=None, target_dialect=None,
                       migration_skill_id=None, skill_version_id=None, target_object_type=None,
                       classification_reason=None, skill_trace=None, classification_rule=None,
-                      human_override=None, routine_analysis=None, routine_language=None) -> int:
+                      human_override=None, routine_analysis=None, routine_language=None,
+                      technical_status="success", review_status="pending_review", diagnostics=None) -> int:
     with closing(connect(path)) as db, db:
         cursor = db.execute(
             """INSERT INTO processing_runs
-            (project_id,object_path,operation,dialect,input_ddl,output_ddl,mapping_json,status,error_message,processed_at,source_dialect,target_dialect,migration_skill_id,skill_version_id,target_object_type,classification_reason,skill_trace_json,classification_rule,human_override,routine_analysis_json,routine_language)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (project_id,object_path,operation,dialect,input_ddl,output_ddl,mapping_json,status,error_message,processed_at,source_dialect,target_dialect,migration_skill_id,skill_version_id,target_object_type,classification_reason,skill_trace_json,classification_rule,human_override,routine_analysis_json,routine_language,technical_status,review_status,diagnostics_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (project_id, object_path, operation, dialect, input_ddl, output_ddl,
              json.dumps(mapping, sort_keys=True) if mapping is not None else None,
              status, error_message, now(), source_dialect or dialect, target_dialect or dialect,
@@ -1043,9 +1050,49 @@ def record_processing(project_id: str | None, object_path: str, operation: str, 
              json.dumps(skill_trace, sort_keys=True) if skill_trace is not None else None,
              classification_rule, human_override,
              json.dumps(routine_analysis, sort_keys=True) if routine_analysis is not None else None,
-             routine_language),
+             routine_language, technical_status, review_status,
+             json.dumps(diagnostics or [], sort_keys=True)),
         )
         return cursor.lastrowid
+
+
+def get_processing_run(run_id: int, path: Path = DATABASE_PATH) -> dict | None:
+    with closing(connect(path)) as db:
+        row = db.execute("SELECT * FROM processing_runs WHERE id=?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    result['diagnostics'] = json.loads(result.get('diagnostics_json') or '[]')
+    return result
+
+
+def set_processing_review(run_id: int, decision: str, reviewer: str = "", notes: str = "",
+                          path: Path = DATABASE_PATH) -> None:
+    """Apply a human review decision while preventing approval with unresolved errors."""
+    allowed = {'pending_review', 'needs_modification', 'approved', 'rejected'}
+    if decision not in allowed:
+        raise ValueError(f"Unsupported routine review status: {decision}")
+    if decision in {'approved', 'rejected'} and not reviewer.strip():
+        raise ValueError("Enter the reviewer name.")
+    with closing(connect(path)) as db, db:
+        row = db.execute(
+            "SELECT technical_status,diagnostics_json FROM processing_runs WHERE id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("Migration run not found.")
+        diagnostics = json.loads(row['diagnostics_json'] or '[]')
+        unresolved_errors = [item for item in diagnostics
+                             if item.get('severity') == 'error' and not item.get('resolved')]
+        if decision == 'approved' and unresolved_errors:
+            raise ValueError(
+                f"Cannot approve: {len(unresolved_errors)} unresolved migration error(s) remain."
+            )
+        db.execute(
+            """UPDATE processing_runs
+               SET review_status=?,reviewed_by=?,reviewed_at=?,review_notes=?
+               WHERE id=?""",
+            (decision, reviewer.strip() or None, now() if reviewer.strip() else None, notes.strip(), run_id),
+        )
 
 
 def latest_mapping(project_id: str, object_path: str = "", path: Path = DATABASE_PATH):

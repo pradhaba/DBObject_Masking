@@ -39,6 +39,23 @@ def infer_returns_table(sql: str, connection, default_schema: str = "dba") -> st
     return ",\n    ".join(f"{name} {data_type}" for name, data_type in expected)
 
 
+def collect_result_inference_errors(sql: str, connection, default_schema: str = "dba") -> list[tuple[str, ValueError]]:
+    """Collect every independently unresolved result expression for review."""
+    parameters = _declared_symbol_types(sql)
+    issues = []
+    seen = set()
+    for body, sources in _outer_select_contexts(sql, default_schema):
+        for expression in _split_sql_list(body):
+            try:
+                _resolve_expression(expression, connection, parameters, default_schema, sources)
+            except ValueError as exc:
+                key = (expression.strip().lower(), str(exc))
+                if key not in seen:
+                    seen.add(key)
+                    issues.append((expression.strip(), exc))
+    return issues
+
+
 def align_result_selects(sql: str) -> str:
     """Reorder equivalent result SELECT lists to the first branch's contract."""
     spans = _outer_select_spans(sql)
@@ -395,10 +412,14 @@ def _function_return_type(connection, schema: str, function: str, argument_types
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT pg_catalog.format_type(p.prorettype, NULL),
-                      p.proargtypes::oid[],
+                      ARRAY(
+                          SELECT arg_oid
+                          FROM unnest(p.proargtypes) WITH ORDINALITY AS oid_args(arg_oid, position)
+                          ORDER BY position
+                      ),
                       ARRAY(
                           SELECT pg_catalog.format_type(arg_type, NULL)
-                          FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS args(arg_type, position)
+                          FROM unnest(p.proargtypes) WITH ORDINALITY AS args(arg_type, position)
                           ORDER BY position
                       ),
                       pg_catalog.pg_get_function_identity_arguments(p.oid),
@@ -478,14 +499,14 @@ def _function_arguments_implicitly_castable(connection, actual: list[str], decla
             continue
         with connection.cursor() as cursor:
             cursor.execute(
-                """SELECT source.oid = %s OR EXISTS (
-                           SELECT 1 FROM pg_catalog.pg_cast cast
-                           WHERE cast.castsource = source.oid
-                             AND cast.casttarget = %s
-                             AND cast.castcontext = 'i'
+                """SELECT source.oid = %s::oid OR EXISTS (
+                           SELECT 1 FROM pg_catalog.pg_cast pc
+                           WHERE pc.castsource = source.oid
+                             AND pc.casttarget = %s::oid
+                             AND pc.castcontext = 'i'
                        )
                    FROM pg_catalog.pg_type source
-                   WHERE source.oid = pg_catalog.to_regtype(%s)""",
+                   WHERE source.oid = pg_catalog.to_regtype(%s)::oid""",
                 (declared_oid, declared_oid, actual_type),
             )
             row = cursor.fetchone()

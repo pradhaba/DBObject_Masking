@@ -123,6 +123,34 @@ class WorkflowTests(unittest.TestCase):
         record_processing(project.id, 'customer.sql', 'mask', 'sybase_ase', 'input', 'output', mapping, path=path)
         self.assertEqual(latest_mapping(project.id, 'customer.sql', path), mapping)
 
+    def test_routine_review_status_persists_and_blocks_unresolved_approval(self):
+        from database import get_processing_run, record_processing, set_processing_review
+        path = self.root / 'routine-review.sqlite3'
+        diagnostic = {
+            'severity': 'error', 'code': 'RESULT_DATATYPE_UNRESOLVED',
+            'message': 'Cannot infer datatype', 'resolved': False,
+        }
+        run_id = record_processing(
+            None, 'routine.sql', 'migrate', 'postgresql', 'source', 'draft', {},
+            technical_status='needs_modification', diagnostics=[diagnostic], path=path,
+        )
+        run = get_processing_run(run_id, path)
+        self.assertEqual(run['technical_status'], 'needs_modification')
+        self.assertEqual(run['review_status'], 'pending_review')
+        self.assertEqual(run['diagnostics'][0]['code'], 'RESULT_DATATYPE_UNRESOLVED')
+        set_processing_review(run_id, 'needs_modification', notes='manual cast required', path=path)
+        self.assertEqual(get_processing_run(run_id, path)['review_status'], 'needs_modification')
+        with self.assertRaisesRegex(ValueError, 'unresolved migration error'):
+            set_processing_review(run_id, 'approved', 'reviewer', path=path)
+
+        clean_run = record_processing(
+            None, 'clean.sql', 'migrate', 'postgresql', 'source', 'output', {}, path=path,
+        )
+        set_processing_review(clean_run, 'approved', 'reviewer', 'validated', path)
+        approved = get_processing_run(clean_run, path)
+        self.assertEqual(approved['review_status'], 'approved')
+        self.assertEqual(approved['reviewed_by'], 'reviewer')
+
     def test_skill_correction_requires_test_then_creates_new_version(self):
         from database import (
             approve_change_proposal, approve_skill_version, create_change_proposal,

@@ -146,7 +146,55 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
         output.pop()
     output = _use_leading_declaration_commas(output)
     formatted = "\n".join(_use_leading_select_commas(output)) + "\n"
-    return _normalize_dba_schema_qualifier(formatted)
+    formatted = _normalize_dba_schema_qualifier(formatted)
+    return _uppercase_postgresql_keywords(formatted)
+
+
+def _uppercase_postgresql_keywords(sql: str) -> str:
+    """Uppercase PostgreSQL/PLpgSQL keywords without touching quoted content."""
+    from sqlparse import keywords
+    keyword_names = set(keywords.KEYWORDS) | set(keywords.KEYWORDS_COMMON) | set(keywords.KEYWORDS_PLPGSQL)
+    keyword_names.update({
+        'ASC', 'DESC', 'QUERY', 'ELSIF', 'INOUT', 'VARIADIC', 'SETOF',
+        'IMMUTABLE', 'STABLE', 'VOLATILE', 'STRICT', 'PARALLEL', 'COST', 'ROWS',
+        'TEMP', 'TEMPORARY', 'UNLOGGED', 'IDENTITY', 'GENERATED', 'OVERRIDING',
+    })
+    output = []
+    index = 0
+    while index < len(sql):
+        if sql[index:index + 2] == '--':
+            end = sql.find('\n', index)
+            end = len(sql) if end < 0 else end
+            output.append(sql[index:end]); index = end; continue
+        if sql[index:index + 2] == '/*':
+            end = sql.find('*/', index + 2)
+            end = len(sql) if end < 0 else end + 2
+            output.append(sql[index:end]); index = end; continue
+        if sql[index] in {"'", '"'}:
+            quote = sql[index]
+            start = index
+            index += 1
+            while index < len(sql):
+                if sql[index] == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 2; continue
+                    index += 1; break
+                index += 1
+            output.append(sql[start:index]); continue
+        named_dollar = re.match(r'\$[A-Za-z_][A-Za-z0-9_]*\$', sql[index:])
+        if named_dollar:
+            delimiter = named_dollar.group(0)
+            end = sql.find(delimiter, index + len(delimiter))
+            end = len(sql) if end < 0 else end + len(delimiter)
+            output.append(sql[index:end]); index = end; continue
+        word = re.match(r'[A-Za-z_][A-Za-z0-9_$]*', sql[index:])
+        if word:
+            value = word.group(0)
+            output.append(value.upper() if value.upper() in keyword_names else value)
+            index += len(value); continue
+        output.append(sql[index])
+        index += 1
+    return ''.join(output)
 
 
 def _normalize_dba_schema_qualifier(sql: str) -> str:

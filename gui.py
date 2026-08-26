@@ -51,6 +51,19 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
                 formatter_indent=project.formatter_indent,
             )
         except Exception as exc:
+            stopped_diagnostics = [{
+                'severity': 'error', 'code': 'MIGRATION_STOPPED', 'line': None,
+                'column': None, 'expression': '', 'message': str(exc),
+                'suggestion': 'Correct the structural source error and run migration again.',
+                'migration_continued': False, 'resolved': False,
+            }]
+            failed_run_id = persist_processing(
+                project, object_path_var, 'migrate', target_dialect, ddl_text, '', {},
+                technical_status='failed', diagnostics=stopped_diagnostics,
+            )
+            if run_context is not None:
+                run_context.update(run_id=failed_run_id, output='')
+            show_migration_diagnostics(run_context, stopped_diagnostics, 'failed', 'pending_review')
             messagebox.showerror('Migration failed', str(exc))
             return
         finally:
@@ -67,17 +80,30 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
             classification_rule=skill['classification_rule'], human_override=skill['human_override'],
             routine_analysis=skill['analysis'],
             routine_language=skill['routine_language'],
+            technical_status=skill.get('technical_status', 'success'),
+            diagnostics=skill.get('diagnostics', []),
         )
         if run_context is not None:
             run_context.update(run_id=run_id, skill_version_id=skill['id'], output=migrated_text)
+        show_migration_diagnostics(
+            run_context, skill.get('diagnostics', []), skill.get('technical_status', 'success'), 'pending_review'
+        )
         if project is not None and run_context is not None and run_context.get('test_plan_callback'):
             run_context['test_plan_callback'](project, ddl_text, migrated_text)
-        messagebox.showinfo(
-            'Migration',
-            f"Migration completed with skill: {skill['name']} v{skill['version']}\n"
-            f"PostgreSQL target: {skill['target_object_type']} ({skill['classification_reason']})\n"
-            "Mapping saved to the project database.",
-        )
+        issue_count = len([item for item in skill.get('diagnostics', []) if not item.get('resolved')])
+        if issue_count:
+            messagebox.showwarning(
+                'Migration needs modification',
+                f"A review draft was generated with {issue_count} unresolved issue(s).\n"
+                "Open the Error Review tab for the source location and suggested correction.",
+            )
+        else:
+            messagebox.showinfo(
+                'Migration',
+                f"Migration completed with skill: {skill['name']} v{skill['version']}\n"
+                f"PostgreSQL target: {skill['target_object_type']} ({skill['classification_reason']})\n"
+                "Mapping saved to the project database.",
+            )
     elif selected_action == 'mask':
         masked_text, mapping = mask_text(ddl_text, dialect, embed_mapping=embed_var.get())
         set_readonly_text(target_text, masked_text)
@@ -110,7 +136,8 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
 def persist_processing(project, object_path_var, operation, dialect, input_ddl, output_ddl, mapping,
                        migration_skill_id=None, skill_version_id=None, target_object_type=None,
                        classification_reason=None, skill_trace=None, classification_rule=None,
-                       human_override=None, routine_analysis=None, routine_language=None):
+                       human_override=None, routine_analysis=None, routine_language=None,
+                       technical_status='success', diagnostics=None):
     """Save a successful workspace operation without coupling the masker to SQLite."""
     if project is None:
         return None
@@ -131,7 +158,31 @@ def persist_processing(project, object_path_var, operation, dialect, input_ddl, 
         human_override=human_override,
         routine_analysis=routine_analysis,
         routine_language=routine_language,
+        technical_status=technical_status,
+        review_status='pending_review',
+        diagnostics=diagnostics,
     )
+
+
+def show_migration_diagnostics(run_context, diagnostics, technical_status, review_status):
+    if not run_context or 'issue_table' not in run_context:
+        return
+    table = run_context['issue_table']
+    table.delete(*table.get_children())
+    for index, item in enumerate(diagnostics):
+        table.insert('', tk.END, iid=str(index), values=(
+            item.get('severity', '').upper(), item.get('code', ''),
+            item.get('line') or '', item.get('message', ''),
+        ), tags=(item.get('severity', 'warning'),))
+    table.tag_configure('error', foreground='#b91c1c')
+    table.tag_configure('warning', foreground='#9a6700')
+    run_context['diagnostics'] = diagnostics
+    run_context['technical_status_var'].set(f"Migration: {technical_status.replace('_', ' ').title()}")
+    run_context['review_status_var'].set(f"Review: {review_status.replace('_', ' ').title()}")
+    run_context['detail_tabs'].tab(
+        run_context['issues_tab'], text=f"Error Review ({len(diagnostics)})"
+    )
+    set_readonly_text(run_context['issue_detail'], 'Select an issue to view its details.' if diagnostics else 'No unresolved migration issues.')
 
 
 def format_skill_trace(skill):
@@ -229,10 +280,13 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     if navigation is not None:
         run_context['test_plan_callback'] = navigation.prepare_routine_test_plan
     def reset_run_context():
-        callback = run_context.get('test_plan_callback')
+        preserved = {key: value for key, value in run_context.items()
+                     if key == 'test_plan_callback' or key.endswith('_var') or key in {
+                         'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab'
+                     }}
         run_context.clear()
-        if callback is not None:
-            run_context['test_plan_callback'] = callback
+        run_context.update(preserved)
+        show_migration_diagnostics(run_context, [], 'not_run', 'pending_review')
 
     if initial_files:
         ttk.Label(control_frame, text='Selected object:').grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
@@ -352,12 +406,83 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     detail_tabs.pack(fill=tk.BOTH, expand=True)
     mapping_tab = ttk.Frame(detail_tabs)
     skill_tab = ttk.Frame(detail_tabs)
+    issues_tab = ttk.Frame(detail_tabs)
     detail_tabs.add(mapping_tab, text='JSON Mapping')
     detail_tabs.add(skill_tab, text='Skill Used')
+    detail_tabs.add(issues_tab, text='Error Review (0)')
     mapping_text = scrolledtext.ScrolledText(mapping_tab, wrap=tk.NONE, state='disabled', width=35)
     mapping_text.pack(fill=tk.BOTH, expand=True)
     skill_text = scrolledtext.ScrolledText(skill_tab, wrap=tk.WORD, state='disabled', width=45)
     skill_text.pack(fill=tk.BOTH, expand=True)
+
+    status_bar = ttk.Frame(issues_tab, padding=6)
+    status_bar.pack(fill=tk.X)
+    technical_status_var = tk.StringVar(value='Migration: Not Run')
+    review_status_var = tk.StringVar(value='Review: Pending Review')
+    ttk.Label(status_bar, textvariable=technical_status_var, font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT)
+    ttk.Label(status_bar, textvariable=review_status_var).pack(side=tk.LEFT, padx=16)
+    issue_table = ttk.Treeview(
+        issues_tab, columns=('severity', 'code', 'line', 'message'), show='headings', height=8
+    )
+    for key, label, width in (
+        ('severity', 'Severity', 75), ('code', 'Issue code', 190),
+        ('line', 'Line', 55), ('message', 'Finding', 460),
+    ):
+        issue_table.heading(key, text=label)
+        issue_table.column(key, width=width, anchor=tk.W)
+    issue_table.pack(fill=tk.BOTH, expand=True, padx=6)
+    issue_detail = scrolledtext.ScrolledText(issues_tab, wrap=tk.WORD, state='disabled', height=8)
+    issue_detail.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+    run_context.update(
+        issue_table=issue_table, issue_detail=issue_detail, detail_tabs=detail_tabs,
+        issues_tab=issues_tab, technical_status_var=technical_status_var,
+        review_status_var=review_status_var, diagnostics=[],
+    )
+
+    def load_issue_detail(_event=None):
+        selected = issue_table.selection()
+        if not selected:
+            return
+        item = run_context.get('diagnostics', [])[int(selected[0])]
+        details = [
+            f"Severity: {item.get('severity', '').upper()}",
+            f"Code: {item.get('code', '')}",
+            f"Location: line {item.get('line') or 'unknown'}, column {item.get('column') or 'unknown'}",
+            f"Migration continued: {'Yes' if item.get('migration_continued') else 'No'}",
+            '', f"Expression: {item.get('expression') or 'Not available'}",
+            '', f"Issue: {item.get('message', '')}",
+            '', f"Suggested action: {item.get('suggestion', '')}",
+        ]
+        set_readonly_text(issue_detail, '\n'.join(details))
+
+    issue_table.bind('<<TreeviewSelect>>', load_issue_detail)
+
+    def set_review(decision):
+        run_id = run_context.get('run_id')
+        if not run_id:
+            messagebox.showwarning('Routine review', 'Run and save a migration before changing its review status.')
+            return
+        reviewer = ''
+        if decision in {'approved', 'rejected'}:
+            reviewer = simpledialog.askstring('Routine review', 'Reviewer name:') or ''
+            if not reviewer:
+                return
+        notes = simpledialog.askstring('Routine review', 'Review notes (optional):') or ''
+        try:
+            from database import set_processing_review
+            set_processing_review(run_id, decision, reviewer, notes)
+        except Exception as exc:
+            messagebox.showerror('Routine review', str(exc))
+            return
+        review_status_var.set(f"Review: {decision.replace('_', ' ').title()}")
+        messagebox.showinfo('Routine review', f"Routine status changed to {decision.replace('_', ' ')}.")
+
+    review_actions = ttk.Frame(issues_tab, padding=6)
+    review_actions.pack(fill=tk.X)
+    ttk.Button(review_actions, text='Needs modification', command=lambda: set_review('needs_modification')).pack(side=tk.LEFT)
+    ttk.Button(review_actions, text='Approve', command=lambda: set_review('approved')).pack(side=tk.LEFT, padx=6)
+    ttk.Button(review_actions, text='Reject', command=lambda: set_review('rejected')).pack(side=tk.LEFT)
 
     pane.add(source_frame, weight=1)
     pane.add(target_frame, weight=1)

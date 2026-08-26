@@ -43,6 +43,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                 "human_override": target_override if target_override != "auto" else None,
                 "routine_language": "plpgsql",
                 "cte_analysis": cte_analysis,
+                "diagnostics": [],
+                "technical_status": "success",
                 "trace": [{
                     "line": "renderer", "source": "EXECUTE IMMEDIATE with tmp_records",
                     "output": "Static parameterized INSERT branches with a PostgreSQL temporary table",
@@ -67,10 +69,25 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
     inferred_result_columns = None
+    diagnostics = []
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
         from result_metadata import infer_returns_table
-        inferred_result_columns = infer_returns_table(working_text, metadata_connection)
+        try:
+            inferred_result_columns = infer_returns_table(working_text, metadata_connection)
+        except ValueError as exc:
+            from result_metadata import collect_result_inference_errors
+            try:
+                issues = collect_result_inference_errors(working_text, metadata_connection)
+            except Exception:
+                issues = []
+            if issues:
+                diagnostics.extend(
+                    _recoverable_migration_diagnostic(working_text, issue, expression)
+                    for expression, issue in issues
+                )
+            else:
+                diagnostics.append(_recoverable_migration_diagnostic(working_text, exc))
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         migrated, renderer_trace, routine_language = render_postgresql_routine(
             migrated, target_type, inferred_result_columns
@@ -106,7 +123,55 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["routine_language"] = routine_language
     skill["trace"] = trace
     skill["cte_analysis"] = cte_analysis
+    skill["diagnostics"] = diagnostics
+    skill["technical_status"] = "needs_modification" if any(
+        item["severity"] == "error" and not item["resolved"] for item in diagnostics
+    ) else "success"
     return restored, mapping, skill
+
+
+def _recoverable_migration_diagnostic(source: str, error: ValueError, expression: str = "") -> dict:
+    """Convert a metadata inference failure into an actionable review issue."""
+    message = str(error)
+    if not expression:
+        match = re.search(r'(?:result expression|for)\s*:\s*(.+?)(?:\.|$)', message, re.IGNORECASE | re.DOTALL)
+        if match:
+            expression = match.group(1).strip()
+    position = source.lower().find(expression.lower()) if expression else -1
+    line = source.count('\n', 0, position) + 1 if position >= 0 else None
+    column = position - source.rfind('\n', 0, position) if position >= 0 else None
+    if 'function metadata not found' in message.lower():
+        code = 'FUNCTION_METADATA_NOT_FOUND'
+        category = 'function_return_type'
+        suggestion = 'Migrate the called function first or manually specify/cast the result datatype.'
+    elif 'overload' in message.lower():
+        code = 'FUNCTION_OVERLOAD_UNRESOLVED'
+        category = 'function_return_type'
+        suggestion = 'Qualify the function and cast its arguments to select one destination overload.'
+    elif 'metadata not found' in message.lower():
+        code = 'COLUMN_METADATA_NOT_FOUND'
+        category = 'result_datatype'
+        suggestion = 'Verify the destination schema/table/column or manually specify the return datatype.'
+    elif 'ambiguous' in message.lower():
+        code = 'AMBIGUOUS_RESULT_EXPRESSION'
+        category = 'result_datatype'
+        suggestion = 'Qualify the column or function call with its table/schema and migrate again.'
+    else:
+        code = 'RESULT_DATATYPE_UNRESOLVED'
+        category = 'result_datatype'
+        suggestion = 'Review the expression and manually provide a compatible PostgreSQL return datatype or cast.'
+    return {
+        'code': code,
+        'severity': 'error',
+        'category': category,
+        'message': message,
+        'expression': expression,
+        'line': line,
+        'column': column,
+        'suggestion': suggestion,
+        'migration_continued': True,
+        'resolved': False,
+    }
 
 
 def _strip_sql_comments(text: str) -> str:

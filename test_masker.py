@@ -31,6 +31,36 @@ class MaskerTests(unittest.TestCase):
         self.assertEqual(skill['source_dialect'], 'sybase_asa')
         self.assertIn('Customer', mapping['procedures'])
 
+    def test_recoverable_metadata_error_produces_review_draft_and_diagnostic(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from database import approve_skill_version, get_skill_version_rules, list_skill_versions, review_skill_rule
+        from migration_engine import migrate_text
+        source = '''CREATE PROCEDURE dba.p()
+RESULT (original_name VARCHAR(50))
+BEGIN
+SELECT missing_function(reports.report_code) AS original_name FROM dba.reports;
+END;'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'skills.sqlite3'
+            candidate = next(v for v in list_skill_versions(path)
+                             if v['source_dialect'] == 'sybase_asa' and v['target_dialect'] == 'postgresql'
+                             and v['status'] == 'awaiting_approval')
+            for rule in get_skill_version_rules(candidate['id'], path):
+                review_skill_rule(rule['id'], 'approved', 'test approval', path)
+            approve_skill_version(candidate['id'], 'test approver', path)
+            with patch('result_metadata.infer_returns_table', side_effect=ValueError(
+                'PostgreSQL function metadata not found for dba.missing_function(character varying).'
+            )):
+                migrated, _mapping, skill = migrate_text(
+                    source, 'sybase_asa', 'postgresql', path, metadata_connection=object()
+                )
+        self.assertIn('missing_function', migrated)
+        self.assertEqual(skill['technical_status'], 'needs_modification')
+        self.assertEqual(skill['diagnostics'][0]['code'], 'FUNCTION_METADATA_NOT_FOUND')
+        self.assertTrue(skill['diagnostics'][0]['migration_continued'])
+
     def test_asa_skill_rejects_non_routine_objects(self):
         from migration_engine import migrate_text
         with self.assertRaisesRegex(ValueError, 'procedures and functions only'):
@@ -98,11 +128,11 @@ END;'''
                 review_skill_rule(rule['id'], 'approved', 'test', path)
             approve_skill_version(candidate['id'], 'tester', path)
             migrated, _, _ = migrate_text(sql, 'sybase_asa', 'postgresql', path)
-        self.assertIn('RETURNS TABLE (\n    mailmerge_set_id int', migrated)
+        self.assertIn('RETURNS TABLE (\n    mailmerge_set_id INT', migrated)
         self.assertIn('\n    , mailmerge_set_name TEXT', migrated)
-        self.assertIn('\n    , mailmerge_category_id int', migrated)
+        self.assertIn('\n    , mailmerge_category_id INT', migrated)
         self.assertIn('\n    , date_column_name TEXT\n)', migrated)
-        self.assertIn('LANGUAGE sql', migrated)
+        self.assertIn('LANGUAGE SQL', migrated)
         self.assertNotIn('RETURN QUERY SELECT 1', migrated)
 
     def test_nested_select_in_where_is_not_return_query(self):
@@ -470,7 +500,7 @@ $$;'''
         self.assertIn('        RETURN QUERY\n        SELECT', formatted)
         self.assertIn('        JOIN dba.u AS u', formatted)
         self.assertIn('            ON u.id = t.id', formatted)
-        self.assertIn('            AND u.active = true;', formatted)
+        self.assertIn('            AND u.active = TRUE;', formatted)
 
     def test_postgresql_formatter_supports_customer_indentation_styles(self):
         from postgres_formatter import format_postgresql_routine
@@ -484,8 +514,8 @@ END;
 $$;'''
         two_spaces = format_postgresql_routine(source, '2 spaces')
         tabs = format_postgresql_routine(source, 'Tabs')
-        self.assertIn('\n  IF true THEN\n', two_spaces)
-        self.assertIn('\n\tIF true THEN\n', tabs)
+        self.assertIn('\n  IF TRUE THEN\n', two_spaces)
+        self.assertIn('\n\tIF TRUE THEN\n', tabs)
 
     def test_postgresql_formatter_uses_leading_select_list_commas(self):
         from postgres_formatter import format_postgresql_routine
@@ -570,6 +600,28 @@ $$;'''
         self.assertIn('FUNCTION dba.f()', formatted)
         self.assertIn('FROM dba.items AS t', formatted)
         self.assertIn("'keep \"dba\".items and dba.items literal'", formatted)
+
+    def test_postgresql_formatter_uppercases_keywords_but_preserves_identifiers_and_literals(self):
+        from postgres_formatter import format_postgresql_routine
+        source = '''create or replace function dba.sample(in p_value integer)
+returns text
+language plpgsql
+as $$
+begin
+if p_value is null then
+return 'select from begin';
+else
+return "lowercase_column"::text;
+end if;
+end;
+$$;'''
+        formatted = format_postgresql_routine(source)
+        for expected in ('CREATE OR REPLACE FUNCTION', 'IN p_value INTEGER', 'RETURNS TEXT',
+                         'LANGUAGE PLPGSQL', 'BEGIN', 'IF p_value IS NULL THEN',
+                         'RETURN', 'ELSE', 'END IF;', 'END;'):
+            self.assertIn(expected, formatted)
+        self.assertIn("'select from begin'", formatted)
+        self.assertIn('"lowercase_column"', formatted)
 
     def test_dynamic_temp_report_uses_static_parameterized_branches(self):
         from dynamic_temp_renderer import render_dynamic_temp_report, supports_dynamic_temp_report
@@ -721,6 +773,26 @@ $$;'''
             Connection(), {}, 'dba', [('dba', 'reports', 'reports')],
         )
         self.assertEqual(resolved, ('string', 'text'))
+
+    def test_function_overload_cast_query_uses_safe_catalog_alias_and_oid_casts(self):
+        from result_metadata import _function_arguments_implicitly_castable
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, query, params):
+                self.query = query
+                self.params = params
+            def fetchone(self): return (True,)
+        class Connection:
+            def __init__(self): self.last = None
+            def cursor(self):
+                self.last = Cursor()
+                return self.last
+        connection = Connection()
+        self.assertTrue(_function_arguments_implicitly_castable(connection, ['smallint'], [23]))
+        self.assertIn('pg_catalog.pg_cast pc', connection.last.query)
+        self.assertNotIn('pg_catalog.pg_cast cast', connection.last.query)
+        self.assertEqual(connection.last.query.count('%s::oid'), 2)
 
     def test_result_metadata_qualifies_unique_unqualified_result_columns(self):
         from result_metadata import qualify_unqualified_result_columns
