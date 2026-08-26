@@ -920,6 +920,9 @@ def _cast_expression_to_type(expression: str, target_type: str) -> str:
         return value + suffix
     if re.fullmatch(r'NULL', value, re.IGNORECASE):
         return f"NULL::{target_type}" + suffix
+    identifier = r'(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)'
+    if re.fullmatch(rf'{identifier}(?:\s*\.\s*{identifier})*', value):
+        return f"{value}::{target_type}{suffix}"
     return f"({value})::{target_type}{suffix}"
 
 

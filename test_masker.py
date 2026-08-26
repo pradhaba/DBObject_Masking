@@ -414,7 +414,7 @@ ENDIF AS head_surname'''
         END'''
         rendered, _, _ = render_postgresql_routine(source, 'function')
         self.assertIn('col2 TEXT', rendered)
-        self.assertIn('(tab.col2)::TEXT AS col2', rendered)
+        self.assertIn('tab.col2::TEXT AS col2', rendered)
 
     def test_pre_normalized_text_contract_still_casts_result_expression(self):
         from migration_engine import render_postgresql_routine
@@ -422,7 +422,7 @@ ENDIF AS head_surname'''
         RESULT (col1 INTEGER, col2 TEXT)
         BEGIN SELECT tab.col1 AS col1, tab.col2 AS col2 FROM TBL_1 AS tab; END'''
         rendered, _, _ = render_postgresql_routine(source, 'function')
-        self.assertIn('(tab.col2)::TEXT AS col2', rendered)
+        self.assertIn('tab.col2::TEXT AS col2', rendered)
 
     def test_metadata_mismatch_casts_expression_to_declared_result_type(self):
         from migration_engine import render_postgresql_routine
@@ -432,8 +432,23 @@ ENDIF AS head_surname'''
         rendered, _, _ = render_postgresql_routine(
             source, 'function', 'item_id smallint, amount numeric(12,2)'
         )
-        self.assertIn('(tab.item_id)::INTEGER AS item_id', rendered)
-        self.assertIn('(tab.amount)::NUMERIC(20,4) AS amount', rendered)
+        self.assertIn('tab.item_id::INTEGER AS item_id', rendered)
+        self.assertIn('tab.amount::NUMERIC(20,4) AS amount', rendered)
+
+    def test_return_cast_keeps_grouping_for_function_calls(self):
+        from migration_engine import _cast_expression_to_type
+        self.assertEqual(
+            _cast_expression_to_type('dba.function_name() AS display_name', 'TEXT'),
+            '(dba.function_name())::TEXT AS display_name',
+        )
+        self.assertEqual(
+            _cast_expression_to_type('rep.report_id', 'INTEGER'),
+            'rep.report_id::INTEGER',
+        )
+        self.assertEqual(
+            _cast_expression_to_type('"rep"."report_id"', 'INTEGER'),
+            '"rep"."report_id"::INTEGER',
+        )
 
     def test_text_return_cast_is_not_duplicated(self):
         from migration_engine import _cast_returns_table_text_outputs
