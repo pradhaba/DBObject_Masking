@@ -107,6 +107,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         restored, implemented_ctes = apply_readability_ctes(restored)
         from postgres_formatter import format_postgresql_routine
         restored = format_postgresql_routine(restored, formatter_indent)
+        restored = _annotate_unresolved_metadata(restored, diagnostics)
         from cte_analyzer import analyze_cte_suitability, cte_trace
         cte_analysis = implemented_ctes + analyze_cte_suitability(restored)
         trace.extend(cte_trace(cte_analysis))
@@ -128,6 +129,79 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         item["severity"] == "error" and not item["resolved"] for item in diagnostics
     ) else "success"
     return restored, mapping, skill
+
+
+def _annotate_unresolved_metadata(sql: str, diagnostics: list[dict]) -> str:
+    """Keep unresolved result expressions and mark them visibly in draft SQL."""
+    unresolved = [
+        item for item in diagnostics
+        if not item.get('resolved') and item.get('code') in {
+            'COLUMN_METADATA_NOT_FOUND', 'FUNCTION_METADATA_NOT_FOUND',
+            'FUNCTION_OVERLOAD_UNRESOLVED', 'AMBIGUOUS_RESULT_EXPRESSION',
+            'RESULT_DATATYPE_UNRESOLVED',
+        }
+    ]
+    if not unresolved:
+        return sql
+
+    annotated = sql
+    for item in unresolved:
+        expression = (item.get('expression') or '').strip()
+        if not expression:
+            continue
+        # Formatting may change whitespace and keyword case, so match tokens
+        # case-insensitively while preserving the rendered expression itself.
+        pattern = re.escape(expression)
+        pattern = re.sub(r'(?:\\\s)+', r'\\s+', pattern)
+        marker = (
+            f" /* MIGRATION REVIEW [{item['code']}]: datatype unidentified; "
+            "original expression preserved */"
+        )
+        if marker in annotated:
+            continue
+        annotated, count = re.subn(
+            pattern,
+            lambda match: match.group(0) + marker,
+            annotated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count == 0:
+            # Table aliasing can turn table.column into ali.column.  Match the
+            # terminal result column within SELECT lists, not arbitrary uses in
+            # JOIN/WHERE clauses, and annotate the rendered expression.
+            identifiers = re.findall(r'"([^"]+)"|\b([A-Za-z_][A-Za-z0-9_$]*)\b', expression)
+            names = [quoted or plain for quoted, plain in identifiers]
+            terminal_column = names[-1] if names else ''
+            from result_metadata import _outer_select_spans
+            for start, end in reversed(_outer_select_spans(annotated)):
+                body = annotated[start:end]
+                expressions = _split_sql_expressions(body)
+                changed = False
+                for index, rendered_expression in enumerate(expressions):
+                    if re.search(
+                        rf'(?:^|\.)\s*"?{re.escape(terminal_column)}"?(?:\s+AS\s+|\s*$)',
+                        rendered_expression,
+                        re.IGNORECASE,
+                    ):
+                        expressions[index] = rendered_expression.rstrip() + marker
+                        changed = True
+                        break
+                if changed:
+                    leading = re.match(r'\s*', body).group(0)
+                    trailing = re.search(r'\s*$', body).group(0)
+                    annotated = annotated[:start] + leading + ',\n    '.join(expressions) + trailing + annotated[end:]
+                    break
+
+    if re.search(r'\bRETURNS\s+SETOF\s+RECORD\b', annotated, re.IGNORECASE):
+        annotated = re.sub(
+            r'(\bRETURNS\s+SETOF\s+RECORD\b)',
+            r'\1 /* MIGRATION REVIEW: one or more result datatypes are unidentified; see Error Review */',
+            annotated,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    return annotated
 
 
 def _recoverable_migration_diagnostic(source: str, error: ValueError, expression: str = "") -> dict:

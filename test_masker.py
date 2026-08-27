@@ -61,6 +61,42 @@ END;'''
         self.assertEqual(skill['diagnostics'][0]['code'], 'FUNCTION_METADATA_NOT_FOUND')
         self.assertTrue(skill['diagnostics'][0]['migration_continued'])
 
+    def test_missing_column_metadata_preserves_and_annotates_result_expression(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from database import approve_skill_version, get_skill_version_rules, list_skill_versions, review_skill_rule
+        from migration_engine import migrate_text
+
+        source = '''CREATE PROCEDURE dba.p()
+BEGIN
+SELECT mailmerge_sets.mailmerge_set_id FROM dba.mailmerge_sets;
+END;'''
+        issue = ValueError('PostgreSQL metadata not found for dba.mailmerge_sets.mailmerge_set_id.')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'skills.sqlite3'
+            candidate = next(v for v in list_skill_versions(path)
+                             if v['source_dialect'] == 'sybase_asa' and v['target_dialect'] == 'postgresql'
+                             and v['status'] == 'awaiting_approval')
+            for rule in get_skill_version_rules(candidate['id'], path):
+                review_skill_rule(rule['id'], 'approved', 'test approval', path)
+            approve_skill_version(candidate['id'], 'test approver', path)
+            with patch('result_metadata.infer_returns_table', side_effect=issue), patch(
+                'result_metadata.collect_result_inference_errors',
+                return_value=[('mailmerge_sets.mailmerge_set_id', issue)],
+            ):
+                migrated, _mapping, skill = migrate_text(
+                    source, 'sybase_asa', 'postgresql', path, metadata_connection=object()
+                )
+
+        self.assertIn('mas.mailmerge_set_id', migrated)
+        self.assertIn(
+            'datatype unidentified; original expression preserved', migrated
+        )
+        self.assertIn('RETURNS SETOF RECORD /* MIGRATION REVIEW:', migrated)
+        self.assertEqual(skill['diagnostics'][0]['code'], 'COLUMN_METADATA_NOT_FOUND')
+        self.assertEqual(skill['technical_status'], 'needs_modification')
+
     def test_asa_skill_rejects_non_routine_objects(self):
         from migration_engine import migrate_text
         with self.assertRaisesRegex(ValueError, 'procedures and functions only'):

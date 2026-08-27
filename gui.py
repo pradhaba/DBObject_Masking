@@ -191,6 +191,22 @@ def show_migration_diagnostics(run_context, diagnostics, technical_status, revie
         run_context['issues_tab'], text=f"Error Review ({len(diagnostics)})"
     )
     set_readonly_text(run_context['issue_detail'], 'Select an issue to view its details.' if diagnostics else 'No unresolved migration issues.')
+    if run_context.get('review_message_var') is not None:
+        unresolved_errors = [
+            item for item in diagnostics
+            if item.get('severity') == 'error' and not item.get('resolved')
+        ]
+        if unresolved_errors:
+            run_context['review_message_var'].set(
+                f'{len(unresolved_errors)} unresolved error(s) block approval. '
+                'Review the findings, choose Needs modification, correct the input, and retest.'
+            )
+        elif technical_status == 'not_run':
+            run_context['review_message_var'].set('Run Test Migrate before choosing a review decision.')
+        else:
+            run_context['review_message_var'].set(
+                'No unresolved errors. Enter the reviewer name, optionally add notes, then approve or reject.'
+            )
 
 
 def format_skill_trace(skill):
@@ -291,13 +307,17 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         preserved = {key: value for key, value in run_context.items()
                      if key == 'test_plan_callback' or key.endswith('_var') or key in {
                          'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab',
-                         'approval_button', 'migrate_button'
+                         'approval_button', 'migrate_button', 'review_callback'
                      }}
         run_context.clear()
         run_context.update(preserved)
         for button_name in ('approval_button', 'migrate_button'):
             if run_context.get(button_name) is not None:
                 run_context[button_name].config(state='disabled')
+        if run_context.get('reviewer_var') is not None:
+            run_context['reviewer_var'].set('')
+        if run_context.get('review_notes_var') is not None:
+            run_context['review_notes_var'].set('')
         show_migration_diagnostics(run_context, [], 'not_run', 'pending_review')
 
     if initial_files:
@@ -479,35 +499,76 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
 
     issue_table.bind('<<TreeviewSelect>>', load_issue_detail)
 
+    review_form = ttk.Frame(issues_tab, padding=(6, 3))
+    review_form.pack(fill=tk.X)
+    reviewer_var = tk.StringVar()
+    review_notes_var = tk.StringVar()
+    review_message_var = tk.StringVar(
+        value='Review the findings. Approval is available only when no unresolved errors remain.'
+    )
+    ttk.Label(review_form, text='Reviewer:').grid(row=0, column=0, sticky=tk.W)
+    ttk.Entry(review_form, textvariable=reviewer_var, width=28).grid(
+        row=0, column=1, sticky=tk.EW, padx=(6, 18)
+    )
+    ttk.Label(review_form, text='Review notes:').grid(row=0, column=2, sticky=tk.W)
+    ttk.Entry(review_form, textvariable=review_notes_var).grid(
+        row=0, column=3, sticky=tk.EW, padx=(6, 0)
+    )
+    review_form.columnconfigure(3, weight=1)
+    ttk.Label(
+        review_form, textvariable=review_message_var, foreground='#075985', wraplength=1000
+    ).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(6, 0))
+
     def set_review(decision):
+        workspace_tabs.select(issues_tab)
         run_id = run_context.get('run_id')
         if not run_id:
-            messagebox.showwarning('Routine review', 'Run and save a migration before changing its review status.')
-            return
-        reviewer = ''
-        if decision in {'approved', 'rejected'}:
-            reviewer = simpledialog.askstring('Routine review', 'Reviewer name:') or ''
-            if not reviewer:
-                return
-        notes = simpledialog.askstring('Routine review', 'Review notes (optional):') or ''
+            review_message_var.set('Run Test Migrate before changing the review status.')
+            return False
+        reviewer = reviewer_var.get().strip()
+        notes = review_notes_var.get().strip()
+        if decision in {'approved', 'rejected'} and not reviewer:
+            review_message_var.set('Enter the reviewer name before approving or rejecting.')
+            return False
+        unresolved_errors = [
+            item for item in run_context.get('diagnostics', [])
+            if item.get('severity') == 'error' and not item.get('resolved')
+        ]
+        if decision == 'approved' and unresolved_errors:
+            review_message_var.set(
+                f'Approval blocked: {len(unresolved_errors)} unresolved error(s). '
+                'Choose Needs modification, correct the Input DDL, and run Test Migrate again.'
+            )
+            return False
         try:
             from database import set_processing_review
             set_processing_review(run_id, decision, reviewer, notes)
         except Exception as exc:
-            messagebox.showerror('Routine review', str(exc))
-            return
+            review_message_var.set(f'Unable to save review: {exc}')
+            return False
         review_status_var.set(f"Review: {decision.replace('_', ' ').title()}")
         if run_context.get('migrate_button') is not None:
             run_context['migrate_button'].config(
                 state='normal' if decision == 'approved' else 'disabled'
             )
-        messagebox.showinfo('Routine review', f"Routine status changed to {decision.replace('_', ' ')}.")
+        messages = {
+            'needs_modification': 'Marked Needs modification. Correct the input and run Test Migrate again.',
+            'approved': 'Test migration approved. The Migrate button is now enabled.',
+            'rejected': 'Test migration rejected. Migrate remains disabled.',
+        }
+        review_message_var.set(messages[decision])
+        return True
 
     review_actions = ttk.Frame(issues_tab, padding=6)
     review_actions.pack(fill=tk.X)
     ttk.Button(review_actions, text='Needs modification', command=lambda: set_review('needs_modification')).pack(side=tk.LEFT)
     ttk.Button(review_actions, text='Approve', command=lambda: set_review('approved')).pack(side=tk.LEFT, padx=6)
     ttk.Button(review_actions, text='Reject', command=lambda: set_review('rejected')).pack(side=tk.LEFT)
+
+    run_context.update(
+        reviewer_var=reviewer_var, review_notes_var=review_notes_var,
+        review_message_var=review_message_var, review_callback=set_review,
+    )
 
     def source_changed(_event=None):
         if not source_text.edit_modified():
@@ -544,23 +605,16 @@ def approve_test_migration(run_context):
     """Approve the displayed preview and unlock the committed migration step."""
     run_id = run_context.get('run_id')
     if not run_id or not run_context.get('output'):
-        messagebox.showwarning('Test approval', 'Run Test Migrate and review its output first.')
+        if run_context.get('detail_tabs') is not None and run_context.get('issues_tab') is not None:
+            run_context['detail_tabs'].select(run_context['issues_tab'])
+        if run_context.get('review_message_var') is not None:
+            run_context['review_message_var'].set('Run Test Migrate and review its output first.')
         return
-    reviewer = simpledialog.askstring('Test approval', 'Reviewer name:') or ''
-    if not reviewer.strip():
-        return
-    notes = simpledialog.askstring('Test approval', 'Review notes (optional):') or ''
-    try:
-        from database import set_processing_review
-        set_processing_review(run_id, 'approved', reviewer, notes)
-    except Exception as exc:
-        messagebox.showerror('Test approval', str(exc))
-        return
-    if run_context.get('review_status_var') is not None:
-        run_context['review_status_var'].set('Review: Approved')
-    if run_context.get('migrate_button') is not None:
-        run_context['migrate_button'].config(state='normal')
-    messagebox.showinfo('Test approval', 'Test migration approved. The Migrate button is now enabled.')
+    if run_context.get('detail_tabs') is not None and run_context.get('issues_tab') is not None:
+        run_context['detail_tabs'].select(run_context['issues_tab'])
+    callback = run_context.get('review_callback')
+    if callback is not None:
+        callback('approved')
 
 
 def migrate_approved_to_postgresql(project, run_context):
