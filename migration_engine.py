@@ -10,8 +10,11 @@ from masker import mask_text, unmask_text
 
 
 def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
-                 target_override="auto", metadata_connection=None, formatter_indent="4 spaces"):
+                 target_override="auto", metadata_connection=None, formatter_indent="4 spaces",
+                 progress_callback=None):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
+    progress = progress_callback or (lambda _percent, _status: None)
+    progress(3, 'Preparing and validating source DDL')
     text = _strip_sql_comments(text)
     _validate_sql_quoted_tokens(text)
     if source_dialect == "sybase_asa" and not re.search(
@@ -24,10 +27,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         skill = get_active_skill_version(source_dialect, target_dialect, database_path)
     if skill is None:
         raise ValueError(f"No active approved migration skill for {source_dialect} → {target_dialect}.")
+    progress(12, 'Loading approved migration skill')
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         from dynamic_temp_renderer import inline_simple_dynamic_sql, render_dynamic_temp_report, supports_dynamic_temp_report
         text, dynamic_inline_count = inline_simple_dynamic_sql(text)
         if supports_dynamic_temp_report(text):
+            progress(35, 'Rendering dynamic temporary-table report')
             _, mapping = mask_text(text, source_dialect, embed_mapping=False)
             from postgres_formatter import format_postgresql_routine
             rendered = _cast_returns_table_text_outputs(render_dynamic_temp_report(text))
@@ -51,12 +56,14 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                     "rules": [{"rule_id": "dynamic-temp-static-renderer", "rule_code": "dynamic-temp-static-renderer", "priority": 1950, "matches": 1}],
                 }] + cte_trace(cte_analysis),
             })
+            progress(100, 'Migration preview complete')
             return rendered, mapping, skill
     else:
         dynamic_inline_count = 0
     working_text = text
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        progress(22, 'Analyzing parameters and result contracts')
         working_text = _promote_asa_globals_to_parameters(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
@@ -65,7 +72,9 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     if _is_already_masked(working_text):
         masked, mapping = working_text, _identity_mapping(working_text)
     else:
+        progress(34, 'Masking database identifiers')
         masked, mapping = mask_text(working_text, source_dialect, embed_mapping=False)
+    progress(48, 'Applying migration and qualification rules')
     migrated, trace = _apply_rules_with_trace(masked, skill["rules"], mapping, source_dialect, target_dialect)
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
@@ -75,6 +84,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         diagnostics.extend(_unqualified_masked_column_diagnostics(migrated, mapping, source_dialect))
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
+        progress(62, 'Resolving PostgreSQL column and function metadata')
         from result_metadata import infer_returns_table
         try:
             inferred_result_columns = infer_returns_table(working_text, metadata_connection)
@@ -92,6 +102,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
             else:
                 diagnostics.append(_recoverable_migration_diagnostic(working_text, exc))
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        progress(76, 'Rendering PostgreSQL routine')
         migrated, renderer_trace, routine_language = render_postgresql_routine(
             migrated, target_type, inferred_result_columns
         )
@@ -106,6 +117,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         routine_language = None
     restored = unmask_text(migrated, mapping, target_dialect)
     if target_dialect == "postgresql":
+        progress(88, 'Formatting and validating migration draft')
         from cte_analyzer import apply_readability_ctes
         restored, implemented_ctes = apply_readability_ctes(restored)
         from postgres_formatter import format_postgresql_routine
@@ -131,6 +143,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["technical_status"] = "needs_modification" if any(
         item["severity"] == "error" and not item["resolved"] for item in diagnostics
     ) else "success"
+    progress(100, 'Migration preview complete')
     return restored, mapping, skill
 
 

@@ -2,6 +2,7 @@
 """GUI for the DDL masking/unmasking tool."""
 
 import json
+import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, simpledialog, ttk
 
@@ -10,6 +11,25 @@ from masker import (
     mask_text,
     unmask_text,
 )
+
+
+def update_processing_progress(run_context, percent, status):
+    """Update stage, elapsed time, and rolling ETA in the migration workspace."""
+    if not run_context or run_context.get('progress_var') is None:
+        return
+    percent = max(0, min(100, int(percent)))
+    if percent <= 3 or 'progress_started_at' not in run_context:
+        run_context['progress_started_at'] = time.monotonic()
+    elapsed = max(0, time.monotonic() - run_context['progress_started_at'])
+    eta = (elapsed * (100 - percent) / percent) if 0 < percent < 100 else 0
+    timing = f'Elapsed {elapsed:.1f}s'
+    if 0 < percent < 100:
+        timing += f' • estimated {eta:.1f}s remaining'
+    run_context['progress_var'].set(percent)
+    run_context['progress_status_var'].set(f'{status} — {percent}% — {timing}')
+    widget = run_context.get('progress_widget')
+    if widget is not None:
+        widget.update_idletasks()
 
 def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, source_text, target_text, mapping_text,
                    skill_text, target_routine_var, project=None, object_path_var=None, workflow_action=None, run_context=None):
@@ -30,8 +50,10 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
     if selected_action == 'migrate' and project is not None:
         from migration_engine import migrate_text
         metadata_connection = None
+        update_processing_progress(run_context, 1, 'Starting Test Migrate')
         try:
             if target_dialect == 'postgresql':
+                update_processing_progress(run_context, 2, 'Connecting to PostgreSQL metadata')
                 from workflow import cache_project_password, get_project_password
                 if not all((project.target_host, project.target_port, project.target_database_name, project.target_username)):
                     messagebox.showerror('PostgreSQL metadata', 'Complete the target connection details by editing this project.')
@@ -48,13 +70,18 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
                     dbname=project.target_database_name, user=project.target_username,
                     password=password, connect_timeout=5,
                 )
+                update_processing_progress(run_context, 3, 'Connected to PostgreSQL metadata')
             migrated_text, mapping, skill = migrate_text(
                 ddl_text, source_dialect, target_dialect,
                 target_override=target_routine_var.get(),
                 metadata_connection=metadata_connection,
                 formatter_indent=project.formatter_indent,
+                progress_callback=lambda percent, status: update_processing_progress(
+                    run_context, percent, status
+                ),
             )
         except Exception as exc:
+            update_processing_progress(run_context, 100, 'Migration preview failed')
             stopped_diagnostics = [{
                 'severity': 'error', 'code': 'MIGRATION_STOPPED', 'line': None,
                 'column': None, 'expression': '', 'message': str(exc),
@@ -87,6 +114,7 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
             technical_status=skill.get('technical_status', 'success'),
             diagnostics=skill.get('diagnostics', []),
         )
+        update_processing_progress(run_context, 100, 'Test Migrate completed')
         if run_context is not None:
             run_context.update(run_id=run_id, skill_version_id=skill['id'], output=migrated_text)
             if run_context.get('approval_button') is not None:
@@ -307,7 +335,8 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         preserved = {key: value for key, value in run_context.items()
                      if key == 'test_plan_callback' or key.endswith('_var') or key in {
                          'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab',
-                         'approval_button', 'migrate_button', 'review_callback'
+                         'approval_button', 'migrate_button', 'review_callback',
+                         'progress_widget'
                      }}
         run_context.clear()
         run_context.update(preserved)
@@ -318,6 +347,10 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
             run_context['reviewer_var'].set('')
         if run_context.get('review_notes_var') is not None:
             run_context['review_notes_var'].set('')
+        if run_context.get('progress_var') is not None:
+            run_context['progress_var'].set(0)
+        if run_context.get('progress_status_var') is not None:
+            run_context['progress_status_var'].set('Ready — waiting for Test Migrate')
         show_migration_diagnostics(run_context, [], 'not_run', 'pending_review')
 
     if initial_files:
@@ -432,6 +465,22 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     ttk.Button(button_frame, text='Copy skill trace', command=lambda: copy_to_clipboard(skill_text, 'Skill trace')).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Show embedded mapping', command=lambda: show_mapping_text(source_text)).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Clear output', command=lambda: clear_results(target_text, mapping_text, skill_text)).pack(side=tk.LEFT, padx=(10, 0))
+
+    progress_frame = ttk.Frame(root, padding=(10, 0, 10, 4))
+    progress_frame.pack(fill=tk.X)
+    progress_var = tk.IntVar(value=0)
+    progress_status_var = tk.StringVar(value='Ready — waiting for Test Migrate')
+    progress_widget = ttk.Progressbar(
+        progress_frame, variable=progress_var, maximum=100, mode='determinate'
+    )
+    progress_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    ttk.Label(progress_frame, textvariable=progress_status_var, width=72).pack(
+        side=tk.LEFT, padx=(10, 0)
+    )
+    run_context.update(
+        progress_var=progress_var, progress_status_var=progress_status_var,
+        progress_widget=progress_widget,
+    )
 
     workspace_tabs = ttk.Notebook(root)
     workspace_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
