@@ -1071,6 +1071,18 @@ ELSE'''
         self.assertIn('CROSS JOIN TBL_4 wt_1', migrated)
         self.assertIn('CROSS JOIN TBL_4 wt_2', migrated)
 
+    def test_later_select_expression_uses_source_expression_not_result_alias(self):
+        from migration_engine import _expand_same_select_alias_references
+
+        sql = '''SELECT MIN(staff.member_id) AS op_member_id,
+        dba.sf_get_provider_info(op_member_id, 1)
+        FROM dba.staff AS staff'''
+        expanded = _expand_same_select_alias_references(sql)
+
+        self.assertIn('MIN(staff.member_id) AS op_member_id', expanded)
+        self.assertIn('dba.sf_get_provider_info((MIN(staff.member_id)), 1)', expanded)
+        self.assertNotIn('sf_get_provider_info(op_member_id', expanded)
+
     def test_masks_sybase_select_into_and_multi_name_declare_as_variables(self):
         sql = '''CREATE PROCEDURE dba.sp_asa_migration_test
         (

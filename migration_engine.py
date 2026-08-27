@@ -69,6 +69,11 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
         working_text = align_result_selects(working_text)
+        # ASA permits a result alias to be reused by expressions later in the
+        # same SELECT. PostgreSQL does not, and metadata inference would also
+        # mistake that alias for a physical source column. Inline the defining
+        # expression before either masking or datatype resolution.
+        working_text = _expand_same_select_alias_references(working_text)
     if _is_already_masked(working_text):
         masked, mapping = working_text, _identity_mapping(working_text)
     else:
