@@ -57,6 +57,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     working_text = text
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        working_text = _promote_asa_globals_to_parameters(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
@@ -70,6 +71,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
     inferred_result_columns = None
     diagnostics = []
+    if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        diagnostics.extend(_unqualified_masked_column_diagnostics(migrated, mapping, source_dialect))
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
         from result_metadata import infer_returns_table
@@ -138,7 +141,7 @@ def _annotate_unresolved_metadata(sql: str, diagnostics: list[dict]) -> str:
         if not item.get('resolved') and item.get('code') in {
             'COLUMN_METADATA_NOT_FOUND', 'FUNCTION_METADATA_NOT_FOUND',
             'FUNCTION_OVERLOAD_UNRESOLVED', 'AMBIGUOUS_RESULT_EXPRESSION',
-            'RESULT_DATATYPE_UNRESOLVED',
+            'RESULT_DATATYPE_UNRESOLVED', 'UNQUALIFIED_COLUMN_REVIEW',
         }
     ]
     if not unresolved:
@@ -153,8 +156,13 @@ def _annotate_unresolved_metadata(sql: str, diagnostics: list[dict]) -> str:
         # case-insensitively while preserving the rendered expression itself.
         pattern = re.escape(expression)
         pattern = re.sub(r'(?:\\\s)+', r'\\s+', pattern)
+        review_reason = (
+            'source table unidentified'
+            if item['code'] == 'UNQUALIFIED_COLUMN_REVIEW'
+            else 'datatype unidentified'
+        )
         marker = (
-            f" /* MIGRATION REVIEW [{item['code']}]: datatype unidentified; "
+            f" /* MIGRATION REVIEW [{item['code']}]: {review_reason}; "
             "original expression preserved */"
         )
         if marker in annotated:
@@ -246,6 +254,38 @@ def _recoverable_migration_diagnostic(source: str, error: ValueError, expression
         'migration_continued': True,
         'resolved': False,
     }
+
+
+def _unqualified_masked_column_diagnostics(sql: str, mapping: dict, source_dialect: str) -> list[dict]:
+    """Flag predicate columns whose owning relation cannot be inferred offline."""
+    issues = []
+    seen = set()
+    result_aliases = {
+        value.lower() for value in re.findall(r'\bAS\s+(COL_\d+)\b', sql, re.IGNORECASE)
+    }
+    clauses = re.compile(
+        r'\b(?:WHERE|ON|HAVING)\b(?P<body>.*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|'
+        r'\bWHERE\b|\bHAVING\b|\bRETURNING\b|;|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    for clause in clauses.finditer(sql):
+        for match in re.finditer(r'(?<![\w$.])(?P<token>COL_\d+)(?![\w$])', clause.group('body'), re.I):
+            token = match.group('token')
+            if token.lower() in seen or token.lower() in result_aliases:
+                continue
+            seen.add(token.lower())
+            expression = unmask_text(token, mapping, source_dialect)
+            issues.append({
+                'code': 'UNQUALIFIED_COLUMN_REVIEW', 'severity': 'error',
+                'category': 'column_qualification',
+                'message': f'Unable to determine the source table for unqualified column {expression}.',
+                'expression': expression,
+                'line': sql.count('\n', 0, clause.start('body') + match.start()) + 1,
+                'column': None,
+                'suggestion': 'Qualify the source column with its table name and run Test Migrate again.',
+                'migration_continued': True, 'resolved': False,
+            })
+    return issues
 
 
 def _strip_sql_comments(text: str) -> str:
@@ -476,13 +516,46 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
         return f"{prefix}{match.group('relation')} AS {alias}"
 
     sql = relation.sub(add_alias, sql)
+    sql, collapsed = _collapse_repeated_join_drivers(sql)
+    changes += collapsed
     for token, alias in aliases.items():
         qualifier = re.compile(rf"(?<![\w.])\"?{re.escape(token)}\"?\s*\.", re.IGNORECASE)
         sql, replaced = qualifier.subn(f"{alias}.", sql)
         changes += replaced
     sql, join_changes = _convert_comma_tables_to_joins(sql)
     changes += join_changes
+    # Mixed explicit JOIN chains cannot use the WHERE-driven converter above;
+    # any simple comma relations left at this point are intentional cross joins.
+    sql, crossed = re.subn(
+        r',\s*(?=(?:"?[A-Za-z_]\w*"?\.)?"?TBL_\d+"?\s+(?:AS\s+)?[A-Za-z_]\w*)',
+        '\nCROSS JOIN ', sql, flags=re.IGNORECASE,
+    )
+    changes += crossed
     return sql, changes
+
+
+def _collapse_repeated_join_drivers(sql: str) -> tuple[str, int]:
+    """Collapse ASA comma-separated join chains that repeat their driver."""
+    pattern = re.compile(
+        r',\s*(?P<relation>(?:"?[A-Za-z_]\w*"?\.)?"?TBL_\d+"?\s+AS\s+'
+        r'(?P<alias>[A-Za-z_]\w*))\s*(?=LEFT\s+(?:OUTER\s+)?JOIN\b)',
+        re.IGNORECASE,
+    )
+    count = 0
+
+    def collapse(match):
+        nonlocal count
+        select_starts = list(re.finditer(r'\bSELECT\b', sql[:match.start()], re.IGNORECASE))
+        scope_start = select_starts[-1].start() if select_starts else 0
+        earlier = sql[scope_start:match.start()]
+        if re.search(
+            rf'(?<![\w]){re.escape(match.group("alias"))}(?![\w])', earlier, re.IGNORECASE
+        ):
+            count += 1
+            return '\n'
+        return match.group(0)
+
+    return pattern.sub(collapse, sql), count
 
 
 def _split_top_level(text: str, delimiter_pattern: str) -> list[str]:
@@ -1024,7 +1097,12 @@ def _split_sql_expressions(text: str) -> list[str]:
 
 def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     """Hoist ASA declarations and convert SET assignments to PL/pgSQL syntax."""
+    body = re.sub(
+        r'"date"\s*\(\s*((?:"?[A-Za-z_]\w*"?\s*\.\s*)?"?[A-Za-z_]\w*"?)\s*\)',
+        r'(\1)::DATE', body, flags=re.IGNORECASE,
+    )
     body = _convert_asa_if_expressions(body)
+    body = _expand_same_select_alias_references(body)
     declarations = []
     output = []
     waiting_for_assignment = False
@@ -1092,10 +1170,16 @@ def _terminate_return_queries(body: str) -> str:
 
 def _convert_asa_if_expressions(body: str) -> str:
     """Convert ASA's IF expression form to a PostgreSQL CASE expression."""
-    expression = re.compile(
+    compact_expression = re.compile(
         r'\bIF\s+(?P<condition>(?:(?!\bIF\b).)*?)\s+THEN\s+'
         r'(?P<when_true>(?:(?!\bIF\b).)*?)\s+ELSE\s+'
         r'(?P<when_false>.*?)\s+ENDIF\b',
+        re.IGNORECASE | re.DOTALL,
+    )
+    spaced_expression = re.compile(
+        r'\(\s*IF\s+(?P<condition>(?:(?!\bIF\b).)*?)\s+THEN\s+'
+        r'(?P<when_true>(?:(?!\bIF\b).)*?)\s+ELSE\s+'
+        r'(?P<when_false>.*?)\s+END\s+IF\s*\)',
         re.IGNORECASE | re.DOTALL,
     )
 
@@ -1105,7 +1189,84 @@ def _convert_asa_if_expressions(body: str) -> str:
         when_false = match.group('when_false').strip()
         return f"CASE WHEN {condition} THEN {when_true} ELSE {when_false} END"
 
-    return expression.sub(convert, body)
+    body = compact_expression.sub(convert, body)
+    return spaced_expression.sub(lambda match: f"({convert(match)})", body)
+
+
+def _expand_same_select_alias_references(sql: str) -> str:
+    """Inline earlier SELECT aliases when ASA permits their later reuse."""
+    from result_metadata import _outer_select_spans
+
+    replacements = []
+    for start, end in _outer_select_spans(sql):
+        expressions = _split_sql_expressions(sql[start:end])
+        aliases = {}
+        changed = False
+        for index, expression in enumerate(expressions):
+            for alias, value in aliases.items():
+                expression, count = re.subn(
+                    rf'(?<![\w.$])"?{re.escape(alias)}"?(?![\w$])',
+                    f'({value})', expression, flags=re.IGNORECASE,
+                )
+                changed = changed or bool(count)
+            expressions[index] = expression
+            alias_match = re.search(r'\s+AS\s+("?[A-Za-z_]\w*"?)\s*$', expression, re.IGNORECASE)
+            if alias_match:
+                alias = alias_match.group(1).strip('"')
+                aliases[alias] = expression[:alias_match.start()].strip()
+        if changed:
+            original = sql[start:end]
+            leading = re.match(r'\s*', original).group(0)
+            trailing = re.search(r'\s*$', original).group(0)
+            replacements.append((start, end, leading + ',\n    '.join(expressions) + trailing))
+    for start, end, replacement in reversed(replacements):
+        sql = sql[:start] + replacement + sql[end:]
+    return sql
+
+
+def _promote_asa_globals_to_parameters(sql: str) -> str:
+    """Make conventionally typed ASA connection globals explicit in PostgreSQL."""
+    globals_found = sorted(set(re.findall(
+        r'(?<![\w#$@])(g[a-z]_[A-Za-z0-9_$]+)(?![\w#$@])', sql, re.IGNORECASE
+    )), key=str.lower)
+    if not globals_found:
+        return sql
+    declaration = re.search(
+        r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROC(?:EDURE)?|FUNCTION)\s+'
+        r'(?:"?[A-Za-z_]\w*"?\.)?"?[A-Za-z_]\w*"?\s*\(',
+        sql, re.IGNORECASE,
+    )
+    if not declaration:
+        return sql
+    close = find_balanced = None
+    depth = 0
+    quote = None
+    for index in range(declaration.end() - 1, len(sql)):
+        char = sql[index]
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth == 0:
+                close = index
+                break
+    if close is None:
+        return sql
+    existing = sql[declaration.end():close].lower()
+    type_by_code = {'i': 'INTEGER', 's': 'TEXT', 'd': 'DATE', 't': 'TIMESTAMP', 'b': 'BOOLEAN'}
+    additions = [
+        f"IN {name} {type_by_code.get(name[1].lower(), 'TEXT')}"
+        for name in globals_found if not re.search(rf'\b{re.escape(name)}\b', existing, re.IGNORECASE)
+    ]
+    if not additions:
+        return sql
+    separator = ',\n ' if existing.strip() else ''
+    return sql[:close] + separator + ',\n '.join(additions) + sql[close:]
 
 
 def _simple_select_body(text: str):

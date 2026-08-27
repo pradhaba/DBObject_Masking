@@ -22,6 +22,11 @@ MAP_COMMENT_END = "-- DDL_MASKER_MAPPING_END"
 
 SUPPORTED_DIALECTS = ('generic', 'oracle', 'sqlserver', 'sybase_ase', 'sybase_asa', 'postgresql')
 
+MASK_TOKEN_PATTERN = re.compile(
+    r'^(?:TBL|VW|PROC|FUNC|TRG|IDX|SEQ|TYPE|COL|PARAM|VAR)_\d+$',
+    re.IGNORECASE,
+)
+
 IDENTIFIER = r'(?:"(?:[^"]|"")+"|\[(?:[^\]]|\]\])+\]|[\w#$@]+)'
 QUALIFIED_IDENTIFIER = rf'{IDENTIFIER}(?:\s*\.\s*{IDENTIFIER})*'
 
@@ -274,6 +279,38 @@ def extract_parameter_names(text):
     return parameters
 
 
+def extract_result_column_names(text):
+    """Extract SQL Anywhere RESULT(...) output-column declarations."""
+    columns = set()
+    for match in re.finditer(r'\bRESULT\s*\(', text, re.IGNORECASE):
+        open_paren = text.find('(', match.start())
+        close_paren = find_balanced_parentheses(text, open_paren)
+        if close_paren == -1:
+            continue
+        for declaration in split_sql_list(text[open_paren + 1:close_paren]):
+            column_match = re.match(
+                rf'\s*(?P<name>{IDENTIFIER})\s+(?P<type>{IDENTIFIER})',
+                declaration,
+                re.IGNORECASE,
+            )
+            if column_match:
+                columns.add(normalize_name(column_match.group('name')))
+    return columns
+
+
+def extract_asa_global_variable_names(text):
+    """Find referenced SQL Anywhere globals that have no local declaration.
+
+    Client routines conventionally use g<type>_ names (for example
+    gi_language).  Requiring the underscore avoids treating SQL keywords or
+    ordinary identifiers beginning with the letter g as variables.
+    """
+    return {
+        normalize_name(match.group(0))
+        for match in re.finditer(r'(?<![\w#$@])g[a-z]_\w+(?![\w#$@])', text, re.IGNORECASE)
+    }
+
+
 def extract_variable_names(text):
     """Extract local variables declared inside routine bodies."""
     variables = set()
@@ -337,8 +374,13 @@ def extract_object_map(text, dialect='generic'):
     query_tables, query_columns = extract_query_names(text)
     object_map['tables'].update(query_tables)
     object_map['columns'].update(query_columns)
+    object_map['columns'].update(extract_result_column_names(text))
     object_map['parameters'].update(extract_parameter_names(text))
     object_map['variables'].update(extract_variable_names(text))
+    if dialect == 'sybase_asa':
+        object_map['variables'].update(
+            extract_asa_global_variable_names(text) - object_map['parameters']
+        )
     return object_map
 
 
@@ -355,9 +397,13 @@ def build_mapping(object_map):
         mapping[object_type] = {}
         prefix = rule['token_prefix']
         for original_name in sorted(object_map[object_type], key=lambda o: o.lower()):
+            if MASK_TOKEN_PATTERN.fullmatch(original_name.lstrip('@:')):
+                continue
             sigil = original_name[0] if original_name.startswith(('@', ':')) else ''
             mapping[object_type][original_name] = f"{sigil}{prefix}_{counter}"
             counter += 1
+        if not mapping[object_type]:
+            del mapping[object_type]
     return mapping
 
 
@@ -454,7 +500,7 @@ def parameter_name_for_dialect(original, dialect, placeholder_has_sigil):
     bare_name = original.lstrip('@:')
     rule = get_unmasking_rule(dialect)
     if rule['preserve_at_sigil']:
-        return original if original.startswith('@') else f'@{bare_name}'
+        return original if original.startswith(('@', ':')) else bare_name
     prefix = rule['parameter_prefix']
     if prefix:
         return bare_name if bare_name.lower().startswith(prefix.lower()) else f'{prefix}{bare_name}'
@@ -468,7 +514,7 @@ def variable_name_for_dialect(original, dialect, placeholder_has_sigil):
     bare_name = original.lstrip('@:')
     rule = get_unmasking_rule(dialect)
     if rule['preserve_at_sigil']:
-        return original if original.startswith('@') else f'@{bare_name}'
+        return original if original.startswith(('@', ':')) else bare_name
     prefix = rule['variable_prefix']
     if prefix:
         return bare_name if bare_name.startswith(prefix) else f'{prefix}{bare_name}'

@@ -997,6 +997,80 @@ ELSE'''
         self.assertEqual({'@result'}, set(mapping['variables']))
         self.assertEqual(sql, unmask_text(masked, mapping))
 
+    def test_masks_asa_result_columns_and_reuses_tokens_in_expressions(self):
+        sql = '''CREATE PROCEDURE dba.appointment_report(
+            IN member_id INTEGER, IN date_from DATE)
+        RESULT (
+            op_appoint_id INTEGER,
+            op_member_id INTEGER,
+            vis_date DATE,
+            vis_total CHAR(200)
+        )
+        BEGIN
+            SELECT appointments.appoint_id AS op_appoint_id,
+                   MIN(staff.member_id) AS op_member_id,
+                   dba.sf_get_provider_info(op_member_id, 1, gi_language, 0),
+                   MIN(appointments.appoint_date) AS vis_date
+            FROM appointments JOIN staff ON appointments.member_id = staff.member_id;
+        END;'''
+
+        masked, mapping = mask_text(sql, dialect='sybase_asa', embed_mapping=False)
+
+        for original in (
+            'appointment_report', 'member_id', 'date_from', 'op_appoint_id',
+            'op_member_id', 'vis_date', 'vis_total', 'gi_language',
+        ):
+            self.assertNotRegex(masked, rf'(?i)(?<![\w]){original}(?![\w])')
+        self.assertEqual(
+            {'op_appoint_id', 'op_member_id', 'vis_date', 'vis_total'}
+            <= set(mapping['columns']), True,
+        )
+        op_member_token = mapping['columns']['op_member_id']
+        self.assertGreaterEqual(masked.count(op_member_token), 3)
+        self.assertIn('gi_language', mapping['variables'])
+        self.assertEqual(sql, unmask_text(masked, mapping, dialect='sybase_asa'))
+
+    def test_finishes_partially_masked_asa_result_without_remasking_tokens(self):
+        sql = '''CREATE PROCEDURE dba.PROC_9(IN PARAM_35 INTEGER)
+        RESULT (op_appoint_id INTEGER, op_member_id INTEGER, vis_date DATE)
+        BEGIN
+            SELECT TBL_1.COL_14 AS op_appoint_id,
+                   MIN(TBL_7.COL_20) AS op_member_id,
+                   dba.sf_get_provider_info(op_member_id, 1, gi_language, 0),
+                   MIN(TBL_1.COL_13) AS vis_date
+            FROM TBL_1 JOIN TBL_7 ON TBL_1.COL_1 = TBL_7.COL_1;
+        END;'''
+
+        masked, mapping = mask_text(sql, dialect='sybase_asa', embed_mapping=False)
+
+        self.assertIn('PROC_9', masked)
+        self.assertIn('PARAM_35', masked)
+        self.assertIn('TBL_1.COL_14', masked)
+        self.assertNotIn('op_appoint_id', masked)
+        self.assertNotIn('op_member_id', masked)
+        self.assertNotIn('vis_date', masked)
+        self.assertNotIn('gi_language', masked)
+        self.assertNotIn('PROC_9', mapping.get('procedures', {}))
+        self.assertNotIn('TBL_1', mapping.get('tables', {}))
+
+    def test_asa_repeated_join_drivers_and_comma_tables_are_normalized(self):
+        from migration_engine import _apply_table_alias_policy
+
+        sql = '''SELECT TBL_1.COL_1 FROM TBL_1
+        LEFT OUTER JOIN TBL_2 ON TBL_1.COL_1 = TBL_2.COL_1,
+        TBL_2 LEFT OUTER JOIN TBL_3 ON TBL_2.COL_2 = TBL_3.COL_2,
+        TBL_4 wt_1, TBL_4 wt_2 WHERE TBL_1.COL_1 > 0'''
+        mapping = {'tables': {
+            'appointments': 'TBL_1', 'appointed_by': 'TBL_2',
+            'staff': 'TBL_3', 'wtlist_r': 'TBL_4',
+        }}
+        migrated, _ = _apply_table_alias_policy(sql, '{"alias_length":3,"aliases":{}}', mapping)
+
+        self.assertEqual(migrated.count('TBL_2 AS apb'), 1)
+        self.assertIn('LEFT OUTER JOIN TBL_3 AS sta', migrated)
+        self.assertIn('CROSS JOIN TBL_4 wt_1', migrated)
+        self.assertIn('CROSS JOIN TBL_4 wt_2', migrated)
+
     def test_masks_sybase_select_into_and_multi_name_declare_as_variables(self):
         sql = '''CREATE PROCEDURE dba.sp_asa_migration_test
         (
