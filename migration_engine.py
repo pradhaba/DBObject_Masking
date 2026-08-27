@@ -64,7 +64,6 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
-        working_text = _promote_asa_globals_to_parameters(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
@@ -82,6 +81,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         masked, mapping = mask_text(working_text, source_dialect, embed_mapping=False)
     progress(48, 'Applying migration and qualification rules')
     migrated, trace = _apply_rules_with_trace(masked, skill["rules"], mapping, source_dialect, target_dialect)
+    if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        migrated = _rewrite_masked_asa_global_accessors(migrated, mapping)
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
     target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
     inferred_result_columns = None
@@ -93,11 +94,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         progress(62, 'Resolving PostgreSQL column and function metadata')
         from result_metadata import infer_returns_table
         try:
-            inferred_result_columns = infer_returns_table(working_text, metadata_connection)
+            inference_text = _rewrite_asa_global_accessors(working_text)
+            inferred_result_columns = infer_returns_table(inference_text, metadata_connection)
         except ValueError as exc:
             from result_metadata import collect_result_inference_errors
             try:
-                issues = collect_result_inference_errors(working_text, metadata_connection)
+                issues = collect_result_inference_errors(inference_text, metadata_connection)
             except Exception:
                 issues = []
             if issues:
@@ -1243,7 +1245,32 @@ def _expand_same_select_alias_references(sql: str) -> str:
     return sql
 
 
-def _promote_asa_globals_to_parameters(sql: str) -> str:
+def _rewrite_asa_global_accessors(sql: str) -> str:
+    """Translate ASA integer session globals to the PostgreSQL getter."""
+    return re.sub(
+        r'(?<![\w.$])(?P<name>gi_[A-Za-z0-9_$]+)(?![\w$])',
+        lambda match: f"dba.get_int_var('{match.group('name')}')",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
+def _rewrite_masked_asa_global_accessors(sql: str, mapping: dict) -> str:
+    """Rewrite masked globals in the body without adding routine parameters."""
+    rewritten = sql
+    for original, token in mapping.get('variables', {}).items():
+        if not re.fullmatch(r'gi_[A-Za-z0-9_$]+', original, re.IGNORECASE):
+            continue
+        rewritten = re.sub(
+            rf'(?<![\w$]){re.escape(token.lstrip("@:"))}(?![\w$])',
+            f"dba.get_int_var('{original}')",
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+    return rewritten
+
+
+def _legacy_promote_asa_globals_to_parameters(sql: str) -> str:
     """Make conventionally typed ASA connection globals explicit in PostgreSQL."""
     globals_found = sorted(set(re.findall(
         r'(?<![\w#$@])(g[a-z]_[A-Za-z0-9_$]+)(?![\w#$@])', sql, re.IGNORECASE
@@ -1257,7 +1284,7 @@ def _promote_asa_globals_to_parameters(sql: str) -> str:
     )
     if not declaration:
         return sql
-    close = find_balanced = None
+    close = None
     depth = 0
     quote = None
     for index in range(declaration.end() - 1, len(sql)):
@@ -1276,7 +1303,9 @@ def _promote_asa_globals_to_parameters(sql: str) -> str:
                 break
     if close is None:
         return sql
-    existing = sql[declaration.end():close].lower()
+    open_paren = declaration.end() - 1
+    existing_text = sql[open_paren + 1:close]
+    existing = existing_text.lower()
     type_by_code = {'i': 'INTEGER', 's': 'TEXT', 'd': 'DATE', 't': 'TIMESTAMP', 'b': 'BOOLEAN'}
     additions = [
         f"IN {name} {type_by_code.get(name[1].lower(), 'TEXT')}"
@@ -1284,8 +1313,19 @@ def _promote_asa_globals_to_parameters(sql: str) -> str:
     ]
     if not additions:
         return sql
-    separator = ',\n ' if existing.strip() else ''
-    return sql[:close] + separator + ',\n '.join(additions) + sql[close:]
+    from masker import split_sql_list
+    parameters = [item.strip() for item in split_sql_list(existing_text) if item.strip()]
+    # PostgreSQL requires every input parameter following the first defaulted
+    # parameter to have a default. ASA connection globals have no known
+    # default, so insert them before the optional suffix.
+    insert_at = next(
+        (index for index, parameter in enumerate(parameters)
+         if re.search(r'\bDEFAULT\b|(?<!:)=(?!=)', parameter, re.IGNORECASE)),
+        len(parameters),
+    )
+    parameters[insert_at:insert_at] = additions
+    replacement = ',\n '.join(parameters)
+    return sql[:open_paren + 1] + replacement + sql[close:]
 
 
 def _cast_literals_for_unique_function_overloads(sql: str, connection) -> str:

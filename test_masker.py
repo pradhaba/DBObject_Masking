@@ -857,6 +857,19 @@ $$;'''
         self.assertIn("dba.get_int_var('gi_language'), 0::smallint)", migrated)
         self.assertEqual(migrated.count(','), 3)
 
+    def test_asa_global_uses_getter_and_does_not_add_parameter(self):
+        from migration_engine import _rewrite_asa_global_accessors
+
+        source = '''CREATE PROCEDURE dba.report(
+            IN session_id INTEGER,
+            IN practice_id INTEGER DEFAULT 0)
+        BEGIN SELECT gi_language; END;'''
+        rewritten = _rewrite_asa_global_accessors(source)
+
+        self.assertIn("SELECT dba.get_int_var('gi_language')", rewritten)
+        signature = rewritten[:rewritten.index('BEGIN')]
+        self.assertNotIn('gi_language', signature)
+
     def test_metadata_resolver_knows_nested_asa_string_return_type(self):
         from result_metadata import _resolve_expression
         class Cursor:
