@@ -13,6 +13,10 @@ from masker import (
 
 def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, source_text, target_text, mapping_text,
                    skill_text, target_routine_var, project=None, object_path_var=None, workflow_action=None, run_context=None):
+    if run_context is not None:
+        for button_name in ('approval_button', 'migrate_button'):
+            if run_context.get(button_name) is not None:
+                run_context[button_name].config(state='disabled')
     ddl_text = source_text.get('1.0', tk.END).strip()
     if not ddl_text:
         messagebox.showwarning('DDL Masker', 'Please select a SQL file or paste DDL text in the input pane.')
@@ -85,6 +89,10 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         )
         if run_context is not None:
             run_context.update(run_id=run_id, skill_version_id=skill['id'], output=migrated_text)
+            if run_context.get('approval_button') is not None:
+                run_context['approval_button'].config(state='normal')
+            if run_context.get('migrate_button') is not None:
+                run_context['migrate_button'].config(state='disabled')
         show_migration_diagnostics(
             run_context, skill.get('diagnostics', []), skill.get('technical_status', 'success'), 'pending_review'
         )
@@ -282,10 +290,14 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     def reset_run_context():
         preserved = {key: value for key, value in run_context.items()
                      if key == 'test_plan_callback' or key.endswith('_var') or key in {
-                         'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab'
+                         'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab',
+                         'approval_button', 'migrate_button'
                      }}
         run_context.clear()
         run_context.update(preserved)
+        for button_name in ('approval_button', 'migrate_button'):
+            if run_context.get(button_name) is not None:
+                run_context[button_name].config(state='disabled')
         show_migration_diagnostics(run_context, [], 'not_run', 'pending_review')
 
     if initial_files:
@@ -375,44 +387,53 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     button_frame = ttk.Frame(root, padding='10')
     button_frame.pack(fill=tk.X)
 
-    ttk.Button(button_frame, text='Process', command=lambda: process_action(
+    is_postgresql_migration = (
+        project is not None and mode_var.get() == 'migrate' and project.target_database == 'PostgreSQL'
+    )
+    ttk.Button(button_frame, text='Test Migrate' if is_postgresql_migration else 'Process', command=lambda: process_action(
         mode_var, source_dialect_var, target_dialect_var, embed_var, source_text, target_text, mapping_text, skill_text, target_routine_var,
         project, object_var, None,
         run_context,
     )).pack(side=tk.LEFT)
-    if project is not None and project.target_database == 'PostgreSQL':
-        ttk.Button(
-            button_frame, text='Test in PostgreSQL',
-            command=lambda: test_migration_in_postgresql(project, run_context),
-        ).pack(side=tk.LEFT, padx=(10, 0))
+    if is_postgresql_migration:
+        approval_button = ttk.Button(
+            button_frame, text='Test Approved', state='disabled',
+            command=lambda: approve_test_migration(run_context),
+        )
+        approval_button.pack(side=tk.LEFT, padx=(10, 0))
+        migrate_button = ttk.Button(
+            button_frame, text='Migrate', state='disabled',
+            command=lambda: migrate_approved_to_postgresql(project, run_context),
+        )
+        migrate_button.pack(side=tk.LEFT, padx=(10, 0))
+        run_context.update(approval_button=approval_button, migrate_button=migrate_button)
     ttk.Button(button_frame, text='Copy output', command=lambda: copy_to_clipboard(target_text, 'Output DDL')).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Copy mapping', command=lambda: copy_to_clipboard(mapping_text, 'Mapping JSON')).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Copy skill trace', command=lambda: copy_to_clipboard(skill_text, 'Skill trace')).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Show embedded mapping', command=lambda: show_mapping_text(source_text)).pack(side=tk.LEFT, padx=(10, 0))
     ttk.Button(button_frame, text='Clear output', command=lambda: clear_results(target_text, mapping_text, skill_text)).pack(side=tk.LEFT, padx=(10, 0))
 
-    pane = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-    pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    workspace_tabs = ttk.Notebook(root)
+    workspace_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    source_frame = ttk.Labelframe(pane, text='Input DDL')
-    target_frame = ttk.Labelframe(pane, text='Output DDL')
-    mapping_frame = ttk.Labelframe(pane, text='Mapping and Skill Details')
+    source_frame = ttk.Frame(workspace_tabs)
+    target_frame = ttk.Frame(workspace_tabs)
+    mapping_tab = ttk.Frame(workspace_tabs)
+    skill_tab = ttk.Frame(workspace_tabs)
+    issues_tab = ttk.Frame(workspace_tabs)
+    workspace_tabs.add(source_frame, text='Input DDL')
+    workspace_tabs.add(target_frame, text='Output DDL')
+    workspace_tabs.add(mapping_tab, text='JSON Mapping')
+    workspace_tabs.add(skill_tab, text='Skills Used')
+    workspace_tabs.add(issues_tab, text='Error Review (0)')
 
     source_text = scrolledtext.ScrolledText(source_frame, wrap=tk.WORD)
     source_text.pack(fill=tk.BOTH, expand=True)
     target_text = scrolledtext.ScrolledText(target_frame, wrap=tk.WORD, state='disabled')
     target_text.pack(fill=tk.BOTH, expand=True)
-    detail_tabs = ttk.Notebook(mapping_frame)
-    detail_tabs.pack(fill=tk.BOTH, expand=True)
-    mapping_tab = ttk.Frame(detail_tabs)
-    skill_tab = ttk.Frame(detail_tabs)
-    issues_tab = ttk.Frame(detail_tabs)
-    detail_tabs.add(mapping_tab, text='JSON Mapping')
-    detail_tabs.add(skill_tab, text='Skill Used')
-    detail_tabs.add(issues_tab, text='Error Review (0)')
-    mapping_text = scrolledtext.ScrolledText(mapping_tab, wrap=tk.NONE, state='disabled', width=35)
+    mapping_text = scrolledtext.ScrolledText(mapping_tab, wrap=tk.NONE, state='disabled')
     mapping_text.pack(fill=tk.BOTH, expand=True)
-    skill_text = scrolledtext.ScrolledText(skill_tab, wrap=tk.WORD, state='disabled', width=45)
+    skill_text = scrolledtext.ScrolledText(skill_tab, wrap=tk.WORD, state='disabled')
     skill_text.pack(fill=tk.BOTH, expand=True)
 
     status_bar = ttk.Frame(issues_tab, padding=6)
@@ -435,7 +456,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     issue_detail.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
     run_context.update(
-        issue_table=issue_table, issue_detail=issue_detail, detail_tabs=detail_tabs,
+        issue_table=issue_table, issue_detail=issue_detail, detail_tabs=workspace_tabs,
         issues_tab=issues_tab, technical_status_var=technical_status_var,
         review_status_var=review_status_var, diagnostics=[],
     )
@@ -476,6 +497,10 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
             messagebox.showerror('Routine review', str(exc))
             return
         review_status_var.set(f"Review: {decision.replace('_', ' ').title()}")
+        if run_context.get('migrate_button') is not None:
+            run_context['migrate_button'].config(
+                state='normal' if decision == 'approved' else 'disabled'
+            )
         messagebox.showinfo('Routine review', f"Routine status changed to {decision.replace('_', ' ')}.")
 
     review_actions = ttk.Frame(issues_tab, padding=6)
@@ -484,9 +509,14 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     ttk.Button(review_actions, text='Approve', command=lambda: set_review('approved')).pack(side=tk.LEFT, padx=6)
     ttk.Button(review_actions, text='Reject', command=lambda: set_review('rejected')).pack(side=tk.LEFT)
 
-    pane.add(source_frame, weight=1)
-    pane.add(target_frame, weight=1)
-    pane.add(mapping_frame, weight=1)
+    def source_changed(_event=None):
+        if not source_text.edit_modified():
+            return
+        source_text.edit_modified(False)
+        reset_run_context()
+        clear_results(target_text, mapping_text, skill_text)
+
+    source_text.bind('<<Modified>>', source_changed)
 
     if initial_files:
         root.after_idle(load_selected_object)
@@ -508,6 +538,75 @@ def return_to_project(root, project):
     launcher = Launcher(root, build_gui)
     launcher.project = next((item for item in launcher.projects if item.id == project.id), project)
     launcher.show_files()
+
+
+def approve_test_migration(run_context):
+    """Approve the displayed preview and unlock the committed migration step."""
+    run_id = run_context.get('run_id')
+    if not run_id or not run_context.get('output'):
+        messagebox.showwarning('Test approval', 'Run Test Migrate and review its output first.')
+        return
+    reviewer = simpledialog.askstring('Test approval', 'Reviewer name:') or ''
+    if not reviewer.strip():
+        return
+    notes = simpledialog.askstring('Test approval', 'Review notes (optional):') or ''
+    try:
+        from database import set_processing_review
+        set_processing_review(run_id, 'approved', reviewer, notes)
+    except Exception as exc:
+        messagebox.showerror('Test approval', str(exc))
+        return
+    if run_context.get('review_status_var') is not None:
+        run_context['review_status_var'].set('Review: Approved')
+    if run_context.get('migrate_button') is not None:
+        run_context['migrate_button'].config(state='normal')
+    messagebox.showinfo('Test approval', 'Test migration approved. The Migrate button is now enabled.')
+
+
+def migrate_approved_to_postgresql(project, run_context):
+    """Commit an approved migration preview to its configured PostgreSQL target."""
+    if not run_context.get('output') or not run_context.get('run_id'):
+        messagebox.showwarning('Migrate', 'Run and approve Test Migrate first.')
+        return
+    from database import get_processing_run
+    saved_run = get_processing_run(run_context['run_id'])
+    if not saved_run or saved_run.get('review_status') != 'approved':
+        if run_context.get('migrate_button') is not None:
+            run_context['migrate_button'].config(state='disabled')
+        messagebox.showerror('Migrate', 'This test migration is not approved. Approve it before migrating.')
+        return
+    if not messagebox.askyesno(
+        'Confirm migration',
+        f"Apply the approved DDL to {project.target_database_name} on {project.target_host}?\n\n"
+        'This step commits changes to the target database.',
+    ):
+        return
+    if not all((project.target_host, project.target_port, project.target_database_name, project.target_username)):
+        messagebox.showerror('Migrate', 'Complete the target PostgreSQL connection details in the project.')
+        return
+    from workflow import cache_project_password, get_project_password
+    password = get_project_password(project.id) or getattr(project, 'target_password', None)
+    if not password:
+        password = simpledialog.askstring('PostgreSQL password', 'Target database password:', show='*')
+        if password is None:
+            return
+        cache_project_password(project.id, password)
+        project.target_password = password
+    try:
+        from deployment import deploy_postgresql
+        result = deploy_postgresql(
+            project, run_context['output'], run_context['run_id'],
+            run_context['skill_version_id'], password,
+        )
+    except Exception as exc:
+        messagebox.showerror('Migration failed', str(exc))
+        return
+    if result['deployed']:
+        if run_context.get('migrate_button') is not None:
+            run_context['migrate_button'].config(state='disabled')
+        messagebox.showinfo('Migration complete', 'The approved DDL was committed to PostgreSQL.')
+    else:
+        messagebox.showerror('Migration failed', result['error'])
 
 
 def test_migration_in_postgresql(project, run_context):

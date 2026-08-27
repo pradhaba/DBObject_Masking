@@ -46,3 +46,43 @@ def test_postgresql_deployment(project, sql: str, processing_run_id: int, skill_
     finally:
         if connection is not None:
             connection.close()
+
+
+def deploy_postgresql(project, sql: str, processing_run_id: int, skill_version_id: int, password: str):
+    """Execute approved DDL and commit it to the configured PostgreSQL target."""
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("Install PostgreSQL support with: pip install psycopg[binary]") from exc
+
+    connection = None
+    try:
+        connection = psycopg.connect(
+            host=project.target_host, port=project.target_port,
+            dbname=project.target_database_name, user=project.target_username,
+            password=password, connect_timeout=5,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+        connection.commit()
+        attempt_id = record_deployment_attempt(
+            processing_run_id, project.id, skill_version_id, sql, 'deployed'
+        )
+        return {'deployed': True, 'attempt_id': attempt_id}
+    except Exception as exc:
+        if connection is not None:
+            connection.rollback()
+        diag = getattr(exc, 'diag', None)
+        sqlstate = getattr(exc, 'sqlstate', None)
+        position = getattr(diag, 'statement_position', None) if diag else None
+        attempt_id = record_deployment_attempt(
+            processing_run_id, project.id, skill_version_id, sql, 'deployment_failed',
+            sqlstate, str(exc), int(position) if position else None,
+        )
+        return {
+            'deployed': False, 'attempt_id': attempt_id, 'sqlstate': sqlstate,
+            'error': str(exc), 'position': position,
+        }
+    finally:
+        if connection is not None:
+            connection.close()
