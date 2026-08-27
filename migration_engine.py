@@ -68,6 +68,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
+            working_text = _cast_literals_for_unique_function_overloads(working_text, metadata_connection)
         working_text = align_result_selects(working_text)
         # ASA permits a result alias to be reused by expressions later in the
         # same SELECT. PostgreSQL does not, and metadata inference would also
@@ -1285,6 +1286,89 @@ def _promote_asa_globals_to_parameters(sql: str) -> str:
         return sql
     separator = ',\n ' if existing.strip() else ''
     return sql[:close] + separator + ',\n '.join(additions) + sql[close:]
+
+
+def _cast_literals_for_unique_function_overloads(sql: str, connection) -> str:
+    """Cast literals when one PostgreSQL overload requires a narrower type."""
+    if not hasattr(connection, 'cursor'):
+        return sql
+    from result_metadata import _canonical_type, _split_sql_list
+
+    calls = list(re.finditer(
+        r'(?P<schema>"?[A-Za-z_]\w*"?)\.(?P<function>"?[A-Za-z_]\w*"?)\s*\(',
+        sql, re.IGNORECASE,
+    ))
+    replacements = []
+    safe_types = {
+        'smallint', 'integer', 'bigint', 'numeric', 'real', 'double precision',
+        'boolean', 'text', 'character varying', 'date', 'time', 'timestamp',
+        'timestamp with time zone', 'timestamp without time zone',
+    }
+    for call in calls:
+        open_paren = call.end() - 1
+        close_paren = _balanced_call_end(sql, open_paren)
+        if close_paren is None:
+            continue
+        argument_text = sql[open_paren + 1:close_paren]
+        arguments = _split_sql_list(argument_text)
+        schema = call.group('schema').strip('"')
+        function = call.group('function').strip('"')
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT ARRAY(
+                           SELECT pg_catalog.format_type(arg_type, NULL)
+                           FROM unnest(p.proargtypes) WITH ORDINALITY AS args(arg_type, position)
+                           ORDER BY position)
+                   FROM pg_catalog.pg_proc p
+                   JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                   WHERE lower(n.nspname)=lower(%s) AND lower(p.proname)=lower(%s)
+                     AND %s BETWEEN (p.pronargs-p.pronargdefaults) AND p.pronargs""",
+                (schema, function, len(arguments)),
+            )
+            candidates = cursor.fetchall()
+        if len(candidates) != 1:
+            continue
+        declared = candidates[0][0]
+        changed = False
+        for index, argument in enumerate(arguments):
+            if index >= len(declared) or re.search(r'::|\bCAST\s*\(', argument, re.I):
+                continue
+            literal_type = (
+                'integer' if re.fullmatch(r'[+-]?\d+', argument.strip())
+                else 'numeric' if re.fullmatch(r'[+-]?(?:\d+\.\d*|\d*\.\d+)', argument.strip())
+                else None
+            )
+            target_type = declared[index]
+            if (literal_type and _canonical_type(literal_type) != _canonical_type(target_type)
+                    and _canonical_type(target_type) in safe_types):
+                arguments[index] = f'{argument.strip()}::{target_type}'
+                changed = True
+        if changed:
+            replacements.append((open_paren + 1, close_paren, ', '.join(arguments)))
+    for start, end, replacement in reversed(replacements):
+        sql = sql[:start] + replacement + sql[end:]
+    return sql
+
+
+def _balanced_call_end(sql: str, open_paren: int) -> int | None:
+    depth = 0
+    quote = None
+    for index in range(open_paren, len(sql)):
+        char = sql[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    continue
+                quote = None
+        elif char in {'"', "'"}:
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
 
 
 def _simple_select_body(text: str):

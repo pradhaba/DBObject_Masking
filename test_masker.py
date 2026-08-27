@@ -809,6 +809,54 @@ $$;'''
         )
         self.assertEqual(resolved, ('original_report_name', 'text'))
 
+    def test_function_metadata_accepts_omitted_trailing_default_argument(self):
+        from result_metadata import _function_return_type
+
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, query, params):
+                self.query = query
+                self.params = params
+            def fetchall(self):
+                if self.params == ('dba', 'sf_get_provider_info', 4):
+                    return [(
+                        'text', [23, 23, 23, 23, 25],
+                        ['integer', 'integer', 'integer', 'integer', 'text'],
+                        'integer, integer, integer, integer, text', False,
+                    )]
+                return []
+
+        class Connection:
+            def cursor(self): return Cursor()
+
+        resolved = _function_return_type(
+            Connection(), 'dba', 'sf_get_provider_info',
+            ['integer', 'integer', 'integer', 'integer'],
+        )
+        self.assertEqual(resolved, 'text')
+
+    def test_unique_function_overload_casts_narrower_literal_and_keeps_default_omitted(self):
+        from migration_engine import _cast_literals_for_unique_function_overloads
+
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _query, params): self.params = params
+            def fetchall(self):
+                if self.params == ('dba', 'sf_get_provider_info', 4):
+                    return [(['integer', 'integer', 'integer', 'smallint', 'character varying'],)]
+                return []
+
+        class Connection:
+            def cursor(self): return Cursor()
+
+        source = "dba.sf_get_provider_info(MIN(staff.member_id), 1, dba.get_int_var('gi_language'), 0)"
+        migrated = _cast_literals_for_unique_function_overloads(source, Connection())
+
+        self.assertIn("dba.get_int_var('gi_language'), 0::smallint)", migrated)
+        self.assertEqual(migrated.count(','), 3)
+
     def test_metadata_resolver_knows_nested_asa_string_return_type(self):
         from result_metadata import _resolve_expression
         class Cursor:
