@@ -129,3 +129,15 @@ mapping for the selected project object.
 The GUI displays input DDL, output DDL, and mapping JSON in separate panes. Use
 **Copy output** or **Copy mapping** to place either result on the clipboard.
 Embedded mapping is optional and disabled by default so output DDL remains clean.
+# PostgreSQL vocabulary and metadata
+
+PostgreSQL keywords, type names, SQL special forms, and the offline built-in
+function protection list are centralized in `postgresql_vocabulary.py`.  Do
+not add private keyword or built-in lists to migration or formatting modules.
+
+Function return types and overloads are not maintained as a static list.  When
+a target connection is available, `result_metadata.py` queries `pg_catalog`
+first (the authoritative catalog for that PostgreSQL server version), then the
+project's default schema for custom routines.  Only source-specific functions
+and deterministic aggregate rules that must work before deployment belong in
+`_source_builtin_return_type`.

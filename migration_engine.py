@@ -672,6 +672,8 @@ def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
 
 def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:
     """Qualify structural table references and non-built-in routine calls."""
+    from postgresql_vocabulary import is_postgresql_builtin
+
     count = 0
     relation = re.compile(
         r"(?P<prefix>\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+)"
@@ -680,19 +682,14 @@ def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:
     )
     line, relation_count = relation.subn(lambda m: f"{m.group('prefix')}{schema}.{m.group('name')}", line)
     count += relation_count
-    builtins = {
-        "abs","avg","cast","ceil","ceiling","coalesce","count","current_date","current_time",
-        "current_timestamp","date_part","extract","greatest","length","lower","max","min","mod",
-        "nullif","octet_length","position","round","substring","sum","trim","upper","len","string",
-        "dba","if","in","values","varchar","char","text","integer","numeric","timestamp","boolean",
-        "and","or","not","then","else","elsif","elseif","case","when","result","returns","table",
-        "begin","end","select","where","exists","as","on","language","function","procedure",
-    }
+    # ASA compatibility functions are rewritten by migration rules and must
+    # not be mistaken for project routines before those rules run.
+    source_builtins = {'len', 'list', 'string', 'isnull'}
     routine = re.compile(r"(?<![\w.\"'])(?P<name>[A-Za-z_][A-Za-z0-9_$]*)\s*(?=\()")
     def qualify_call(match):
         nonlocal count
         name = match.group("name")
-        if name.lower() in builtins or "_" not in name:
+        if is_postgresql_builtin(name) or name.lower() in source_builtins or "_" not in name:
             return match.group(0)
         count += 1
         return f"{schema}.{name}"

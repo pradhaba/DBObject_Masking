@@ -152,13 +152,7 @@ def format_postgresql_routine(sql: str, indent_style: str = "4 spaces") -> str:
 
 def _uppercase_postgresql_keywords(sql: str) -> str:
     """Uppercase PostgreSQL/PLpgSQL keywords without touching quoted content."""
-    from sqlparse import keywords
-    keyword_names = set(keywords.KEYWORDS) | set(keywords.KEYWORDS_COMMON) | set(keywords.KEYWORDS_PLPGSQL)
-    keyword_names.update({
-        'ASC', 'DESC', 'QUERY', 'ELSIF', 'INOUT', 'VARIADIC', 'SETOF',
-        'IMMUTABLE', 'STABLE', 'VOLATILE', 'STRICT', 'PARALLEL', 'COST', 'ROWS',
-        'TEMP', 'TEMPORARY', 'UNLOGGED', 'IDENTITY', 'GENERATED', 'OVERRIDING',
-    })
+    from postgresql_vocabulary import POSTGRESQL_KEYWORDS
     output = []
     index = 0
     while index < len(sql):
@@ -190,7 +184,7 @@ def _uppercase_postgresql_keywords(sql: str) -> str:
         word = re.match(r'[A-Za-z_][A-Za-z0-9_$]*', sql[index:])
         if word:
             value = word.group(0)
-            output.append(value.upper() if value.upper() in keyword_names else value)
+            output.append(value.upper() if value.upper() in POSTGRESQL_KEYWORDS else value)
             index += len(value); continue
         output.append(sql[index])
         index += 1

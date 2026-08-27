@@ -342,7 +342,13 @@ def _resolve_expression(expression: str, connection, parameters: dict, default_s
         builtin_type = _source_builtin_return_type(function, argument_types) if not function_call.group('schema') else None
         if builtin_type:
             return output_name or function, builtin_type
-        return output_name or function, _function_return_type(connection, schema, function, argument_types)
+        if function_call.group('schema'):
+            return output_name or function, _function_return_type(
+                connection, schema, function, argument_types
+            )
+        return output_name or function, _unqualified_function_return_type(
+            connection, default_schema, function, argument_types
+        )
 
     scalar = re.search(
         rf'\bSELECT\s+(?P<qual>{SQL_IDENT})\.(?P<column>{SQL_IDENT})\s+FROM\s+'
@@ -459,9 +465,52 @@ def _function_return_type(connection, schema: str, function: str, argument_types
     return return_type
 
 
+def _unqualified_function_return_type(connection, default_schema: str, function: str,
+                                      argument_types: list[str]) -> str:
+    """Resolve PostgreSQL built-ins first, then project routines.
+
+    pg_catalog is PostgreSQL's complete, server-version-specific built-in
+    catalog.  Using it here covers extensions and overload changes without a
+    permanently incomplete hard-coded return-type list.
+    """
+    errors = []
+    for schema in ('pg_catalog', default_schema):
+        try:
+            return _function_return_type(connection, schema, function, argument_types)
+        except ValueError as exc:
+            if not str(exc).startswith('PostgreSQL function metadata not found for'):
+                raise
+            errors.append(exc)
+    signature = f"{function}({', '.join(argument_types)})"
+    raise ValueError(
+        f"PostgreSQL function metadata not found for unqualified {signature}; "
+        f"searched pg_catalog and {default_schema}."
+    ) from errors[-1]
+
+
 def _source_builtin_return_type(function: str, argument_types: list[str]) -> str | None:
     """Types for ASA built-ins that are rewritten before PostgreSQL deployment."""
     name = function.lower()
+    # Unqualified aggregate calls are PostgreSQL built-ins.  Resolve their
+    # result contract locally instead of looking for (for example) dba.min in
+    # pg_proc.  Explicitly schema-qualified calls still take the normal
+    # user-defined-function metadata path in _resolve_expression.
+    if name in {'min', 'max'} and len(argument_types) == 1:
+        return argument_types[0]
+    if name == 'count':
+        return 'bigint'
+    if name == 'sum' and len(argument_types) == 1:
+        argument_type = _canonical_type(argument_types[0])
+        if argument_type in {'smallint', 'integer'}:
+            return 'bigint'
+        if argument_type == 'bigint':
+            return 'numeric'
+        return argument_types[0]
+    if name == 'avg' and len(argument_types) == 1:
+        argument_type = _canonical_type(argument_types[0])
+        if argument_type in {'smallint', 'integer', 'bigint', 'numeric', 'decimal'}:
+            return 'numeric'
+        return argument_types[0]
     if name in {'string', 'list'}:
         return 'text'
     if name in {'len', 'length', 'char_length'}:
