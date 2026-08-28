@@ -322,6 +322,12 @@ def extract_variable_names(text):
     ):
         for name in split_sql_list(match.group('names')):
             variables.add(normalize_name(name))
+    for match in re.finditer(
+        rf'\bFOR\s+(?P<name>@?{IDENTIFIER})\s+IN\s+SELECT\b',
+        text,
+        re.IGNORECASE,
+    ):
+        variables.add(normalize_name(match.group('name')))
     return variables
 
 

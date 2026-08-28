@@ -64,6 +64,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
+        working_text = _convert_asa_local_temporary_tables(working_text)
+        working_text = _convert_asa_cursor_for_loops(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
@@ -177,6 +179,8 @@ def _annotate_unresolved_metadata(sql: str, diagnostics: list[dict]) -> str:
         # case-insensitively while preserving the rendered expression itself.
         pattern = re.escape(expression)
         pattern = re.sub(r'(?:\\\s)+', r'\\s+', pattern)
+        if re.fullmatch(r'[A-Za-z_]\w*', expression):
+            pattern = rf'(?<![\w$]){pattern}(?![\w$])'
         review_reason = (
             'source table unidentified'
             if item['code'] == 'UNQUALIFIED_COLUMN_REVIEW'
@@ -465,7 +469,7 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
     changes = 0
     reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET|END|ELSE|ELSIF|EXCEPTION)"
     relation = re.compile(
-        rf"(?P<prefix>(?:\b(?:FROM|JOIN)\s+|,\s*))(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))(?!\s*\.)"
+        rf"(?P<prefix>(?:\b(?:FROM|JOIN)\s+|,\s*))(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))(?!\s*[.(])"
         rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)[A-Za-z_]\w*))?",
         re.IGNORECASE,
     )
@@ -543,6 +547,8 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
         qualifier = re.compile(rf"(?<![\w.])\"?{re.escape(token)}\"?\s*\.", re.IGNORECASE)
         sql, replaced = qualifier.subn(f"{alias}.", sql)
         changes += replaced
+    sql, qualified = _qualify_single_table_predicates(sql)
+    changes += qualified
     sql, join_changes = _convert_comma_tables_to_joins(sql)
     changes += join_changes
     # Mixed explicit JOIN chains cannot use the WHERE-driven converter above;
@@ -553,6 +559,32 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
     )
     changes += crossed
     return sql, changes
+
+
+def _qualify_single_table_predicates(sql: str) -> tuple[str, int]:
+    """Qualify masked predicate columns when a scope has exactly one relation."""
+    count = 0
+    patterns = [
+        re.compile(
+            r'(?P<head>EXISTS\s*\(\s*SELECT\s+\*\s+FROM\s+'
+            r'(?:(?:"?[A-Za-z_]\w*"?)\.)?"?TBL_\d+"?\s+AS\s+'
+            r'(?P<alias>[A-Za-z_]\w*)\s+WHERE\s+)(?P<column>COL_\d+)\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'(?P<head>DELETE\s+FROM\s+(?:(?:"?[A-Za-z_]\w*"?)\.)?'
+            r'"?TBL_\d+"?\s+AS\s+(?P<alias>[A-Za-z_]\w*)\s+WHERE\s+)'
+            r'(?P<column>COL_\d+)\b',
+            re.IGNORECASE,
+        ),
+    ]
+    for pattern in patterns:
+        def qualify(match):
+            nonlocal count
+            count += 1
+            return f"{match.group('head')}{match.group('alias')}.{match.group('column')}"
+        sql = pattern.sub(qualify, sql)
+    return sql, count
 
 
 def _collapse_repeated_join_drivers(sql: str) -> tuple[str, int]:
@@ -1212,6 +1244,64 @@ def _convert_asa_if_expressions(body: str) -> str:
 
     body = compact_expression.sub(convert, body)
     return spaced_expression.sub(lambda match: f"({convert(match)})", body)
+
+
+def _convert_asa_local_temporary_tables(sql: str) -> str:
+    """Convert ASA local temporary declarations and keep them in pg_temp."""
+    names = []
+
+    def declaration(match):
+        name = match.group('name').strip('"')
+        names.append(name)
+        return f'CREATE TEMPORARY TABLE pg_temp.{name}'
+
+    converted = re.sub(
+        r'\bDECLARE\s+LOCAL\s+TEMPORARY\s+TABLE\s+'
+        r'(?P<name>"?[A-Za-z_][A-Za-z0-9_$]*"?)',
+        declaration,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    for name in names:
+        converted = re.sub(
+            rf'(?P<prefix>\b(?:INSERT\s+INTO|FROM|JOIN|UPDATE|DELETE\s+FROM)\s+)'
+            rf'(?!(?:pg_temp)\s*\.)"?{re.escape(name)}"?',
+            lambda match: f"{match.group('prefix')}pg_temp.{name}",
+            converted,
+            flags=re.IGNORECASE,
+        )
+    return converted
+
+
+def _convert_asa_cursor_for_loops(sql: str) -> str:
+    """Convert ASA FOR ... CURSOR FOR SELECT ... DO loops to PL/pgSQL."""
+    cursor_loop = re.compile(
+        r'\bFOR\s+[A-Za-z_]\w*\s+AS\s+[A-Za-z_]\w*\s+'
+        r'(?:DYNAMIC\s+)?(?:SCROLL\s+)?CURSOR\s+FOR\s+'
+        r'SELECT\s+(?P<expression>.*?)\s+AS\s+(?P<target>@?[A-Za-z_]\w*)\s+'
+        r'FROM\s+(?P<from_clause>.*?)\s+DO\s+'
+        r'(?P<body>.*?)\s+END\s+FOR\s*;?',
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def convert(match):
+        cast_type = re.search(
+            r'\bCAST\s*\(.*?\s+AS\s+(?P<type>[A-Za-z_]\w*)\s*\)',
+            match.group('expression'),
+            re.IGNORECASE | re.DOTALL,
+        )
+        target_type = cast_type.group('type') if cast_type else 'TEXT'
+        return (
+            f"DECLARE {match.group('target')} {target_type};\n"
+            f"FOR {match.group('target')} IN\n"
+            f"    SELECT {match.group('expression').strip()}\n"
+            f"    FROM {match.group('from_clause').strip()}\n"
+            "LOOP\n"
+            f"{match.group('body').strip()}\n"
+            "END LOOP;"
+        )
+
+    return cursor_loop.sub(convert, sql)
 
 
 def _expand_same_select_alias_references(sql: str) -> str:

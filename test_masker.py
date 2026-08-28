@@ -870,6 +870,31 @@ $$;'''
         signature = rewritten[:rewritten.index('BEGIN')]
         self.assertNotIn('gi_language', signature)
 
+    def test_asa_local_temp_table_and_cursor_loop_are_preconverted(self):
+        from migration_engine import (
+            _convert_asa_cursor_for_loops,
+            _convert_asa_local_temporary_tables,
+        )
+
+        source = '''BEGIN
+        DECLARE LOCAL TEMPORARY TABLE t_ids_table(row_value LONG VARCHAR)
+        ON COMMIT DELETE ROWS;
+        INSERT INTO t_ids_table SELECT row_value FROM sa_split_list(@ids);
+        FOR tr AS rem_cursor DYNAMIC SCROLL CURSOR FOR
+            SELECT CAST(row_value AS INT) AS @id FROM t_ids_table
+        DO DELETE FROM dba.items WHERE id = @id; END FOR;
+        END;'''
+        converted = _convert_asa_local_temporary_tables(source)
+        converted = _convert_asa_cursor_for_loops(converted)
+
+        self.assertIn('CREATE TEMPORARY TABLE pg_temp.t_ids_table', converted)
+        self.assertIn('INSERT INTO pg_temp.t_ids_table', converted)
+        self.assertIn('FROM pg_temp.t_ids_table', converted)
+        self.assertIn('DECLARE @id INT;', converted)
+        self.assertIn('FOR @id IN', converted)
+        self.assertIn('END LOOP;', converted)
+        self.assertNotRegex(converted, r'(?i)DYNAMIC\s+SCROLL|END\s+FOR')
+
     def test_metadata_resolver_knows_nested_asa_string_return_type(self):
         from result_metadata import _resolve_expression
         class Cursor:
