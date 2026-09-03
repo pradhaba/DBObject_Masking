@@ -76,42 +76,105 @@ def align_result_selects(sql: str) -> str:
             leading = re.match(r'\s*', original).group(0)
             trailing = re.search(r'\s*$', original).group(0)
             replacements.append((start, end, leading + ",\n    ".join(ordered) + trailing))
-    for start, end, replacement in reversed(replacements):
+    for start, end, replacement in sorted(replacements, key=lambda item: item[0], reverse=True):
         sql = sql[:start] + replacement + sql[end:]
     return sql
 
 
 def qualify_unqualified_result_columns(sql: str, connection, default_schema: str = "dba") -> str:
-    """Qualify direct result columns when destination metadata identifies one source table."""
-    replacements = []
+    """Qualify unqualified columns throughout every SELECT query scope.
+
+    A name is bound only when exactly one table visible to that SELECT contains
+    it. PostgreSQL catalog metadata is supplemented with columns declared by
+    local temporary tables in the routine being migrated.
+    """
+    replacements: list[tuple[int, int, str]] = []
     order_qualifiers: dict[str, str] = {}
-    for start, end in _outer_select_spans(sql):
+    local_columns = _local_temporary_table_columns(sql)
+    metadata_cache: dict[tuple[str, str, str], str | None] = {}
+    occupied: set[tuple[int, int]] = set()
+    nested_scopes: list[tuple[int, int]] = []
+
+    def column_type(schema: str, table: str, column: str) -> str | None:
+        local = local_columns.get(table.lower(), {})
+        if column.lower() in local:
+            return local[column.lower()]
+        if not hasattr(connection, 'cursor'):
+            return None
+        key = (schema.lower(), table.lower(), column.lower())
+        if key not in metadata_cache:
+            metadata_cache[key] = _find_column_type(connection, schema, table, column)
+        return metadata_cache[key]
+
+    def unique_match(sources, column):
+        matches = [(table, alias) for schema, table, alias in sources if column_type(schema, table, column)]
+        return matches[0] if len(matches) == 1 else None
+
+    # Innermost/rightmost queries are handled first. Their complete ranges are
+    # then excluded from parent scopes so correlated nesting cannot bind a
+    # child column to an unrelated outer table.
+    for start, end in reversed(_all_select_spans(sql)):
         sources = _select_source_tables(sql, end, default_schema)
+        if not sources:
+            continue
         expressions = _split_sql_list(sql[start:end])
-        changed = False
-        for position, expression in enumerate(expressions):
+        expression_cursor = start
+        for expression in expressions:
+            expression_at = sql.find(expression, expression_cursor, end)
+            expression_cursor = expression_at + len(expression) if expression_at >= 0 else expression_cursor
             direct = re.fullmatch(rf'\s*(?P<column>{SQL_IDENT})\s*', expression)
-            if not direct:
+            if not direct or expression_at < 0:
                 continue
             column_token = direct.group('column')
             column = _unquote_identifier(column_token)
-            matches = []
-            for schema, table, alias in sources:
-                if _find_column_type(connection, schema, table, column):
-                    matches.append((table, alias))
-            if len(matches) != 1:
+            match = unique_match(sources, column)
+            if not match:
                 continue
-            table, alias = matches[0]
+            table, alias = match
             qualifier = alias if alias.lower() != table.lower() else table
-            expressions[position] = f'{_quote_identifier(qualifier)}.{column_token}'
-            order_qualifiers[column.lower()] = f'{_quote_identifier(qualifier)}.{column_token}'
-            changed = True
-        if changed:
-            original = sql[start:end]
-            leading = re.match(r'\s*', original).group(0)
-            trailing = re.search(r'\s*$', original).group(0)
-            replacements.append((start, end, leading + ',\n    '.join(expressions) + trailing))
-    for start, end, replacement in reversed(replacements):
+            qualified = f'{_quote_identifier(qualifier)}.{column_token}'
+            token_offset = expression.find(column_token)
+            token_span = (expression_at + token_offset, expression_at + token_offset + len(column_token))
+            replacements.append((*token_span, qualified))
+            occupied.add(token_span)
+            order_qualifiers[column.lower()] = qualified
+
+        scope_end = _select_scope_end(sql, end)
+        scope = sql[start:scope_end]
+        # Query relation names, aliases, SQL words, function names, variables,
+        # and already-qualified columns are naturally excluded below. Remaining
+        # names are checked against every relation in this SELECT scope.
+        relation_names = {
+            value.lower() for _schema, table, alias in sources for value in (table, alias)
+        }
+        for token in re.finditer(SQL_IDENT, scope):
+            absolute_start = start + token.start()
+            absolute_end = start + token.end()
+            if (absolute_start, absolute_end) in occupied or any(
+                child_start <= absolute_start < child_end for child_start, child_end in nested_scopes
+            ) or _inside_single_quoted_sql(sql, absolute_start):
+                continue
+            before = sql[:absolute_start]
+            after = sql[absolute_end:]
+            if re.search(r'(?:\.|@|:)\s*$', before) or re.match(r'\s*\.', after):
+                continue
+            if re.match(r'\s*\(', after):
+                continue
+            value = _unquote_identifier(token.group(0))
+            if value.lower() in relation_names or re.search(
+                r'\b(?:FROM|JOIN|AS|INTO|UPDATE|TABLE)\s*$', before, re.I
+            ):
+                continue
+            match = unique_match(sources, value)
+            if not match:
+                continue
+            table, alias = match
+            qualifier = alias if alias.lower() != table.lower() else table
+            replacements.append((absolute_start, absolute_end, f'{_quote_identifier(qualifier)}.{token.group(0)}'))
+            occupied.add((absolute_start, absolute_end))
+        nested_scopes.append((start - len('SELECT'), scope_end))
+
+    for start, end, replacement in sorted(replacements, key=lambda item: item[0], reverse=True):
         sql = sql[:start] + replacement + sql[end:]
     for column, qualified in order_qualifiers.items():
         sql = re.sub(
@@ -121,6 +184,56 @@ def qualify_unqualified_result_columns(sql: str, connection, default_schema: str
             flags=re.IGNORECASE,
         )
     return sql
+
+
+def _inside_single_quoted_sql(sql: str, position: int) -> bool:
+    """Return whether a source offset occurs inside a SQL string literal."""
+    quote = False
+    index = 0
+    while index < position:
+        if sql[index] == "'":
+            if quote and index + 1 < len(sql) and sql[index + 1] == "'":
+                index += 2
+                continue
+            quote = not quote
+        index += 1
+    return quote
+
+
+def _local_temporary_table_columns(sql: str) -> dict[str, dict[str, str]]:
+    """Collect local temporary-table columns before those tables exist in PostgreSQL."""
+    tables: dict[str, dict[str, str]] = {}
+    declaration = re.compile(
+        rf'\b(?:DECLARE\s+LOCAL\s+TEMPORARY|CREATE\s+TEMPORARY)\s+TABLE\s+'
+        rf'(?:pg_temp\.)?(?P<table>{SQL_IDENT})\s*\(',
+        re.I,
+    )
+    for match in declaration.finditer(sql):
+        open_at = match.end() - 1
+        depth, quote, cursor = 0, None, open_at
+        while cursor < len(sql):
+            char = sql[cursor]
+            if quote:
+                if char == quote:
+                    quote = None
+            elif char in ("'", '"'):
+                quote = char
+            elif char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            cursor += 1
+        if depth:
+            continue
+        columns = {}
+        for item in _split_sql_list(sql[open_at + 1:cursor]):
+            column = re.match(rf'\s*(?P<name>{SQL_IDENT})\s+(?P<type>{IDENT}(?:\s*\([^)]*\))?)', item, re.I)
+            if column:
+                columns[_unquote_identifier(column.group('name')).lower()] = _normalize_declared_type(column.group('type'))
+        tables[_unquote_identifier(match.group('table')).lower()] = columns
+    return tables
 
 
 def _quote_identifier(value: str) -> str:
@@ -161,7 +274,9 @@ def _select_source_tables(sql: str, from_position: int, default_schema: str) -> 
         elif char == '(':
             depth += 1
         elif char == ')':
-            depth = max(0, depth - 1)
+            if depth == 0:
+                break
+            depth -= 1
         elif depth == 0 and boundary.match(sql, cursor):
             break
         cursor += 1
@@ -227,6 +342,82 @@ def _outer_select_spans(sql: str) -> list[tuple[int, int]]:
                     cursor += 1
         index += 1
     return results
+
+
+def _all_select_spans(sql: str) -> list[tuple[int, int]]:
+    """Return SELECT-list spans at every nesting depth."""
+    results = []
+    index = 0
+    quote = None
+    select_word = re.compile(r'\bSELECT\b', re.I)
+    from_word = re.compile(r'\bFROM\b', re.I)
+    while index < len(sql):
+        char = sql[index]
+        if quote:
+            if char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        selected = select_word.match(sql, index)
+        if not selected:
+            index += 1
+            continue
+        cursor, depth, local_quote = selected.end(), 0, None
+        while cursor < len(sql):
+            current = sql[cursor]
+            if local_quote:
+                if current == local_quote:
+                    if cursor + 1 < len(sql) and sql[cursor + 1] == local_quote:
+                        cursor += 2
+                        continue
+                    local_quote = None
+            elif current in ("'", '"'):
+                local_quote = current
+            elif current == '(':
+                depth += 1
+            elif current == ')':
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and from_word.match(sql, cursor):
+                results.append((selected.end(), cursor))
+                break
+            cursor += 1
+        index = selected.end()
+    return results
+
+
+def _select_scope_end(sql: str, from_position: int) -> int:
+    """Find the end of the SELECT containing a known FROM position."""
+    depth, quote, cursor = 0, None, from_position
+    procedural = re.compile(r'\b(?:DO|LOOP|THEN|END\s+IF|END\s+LOOP|END\s+FOR)\b', re.I)
+    while cursor < len(sql):
+        char = sql[cursor]
+        if quote:
+            if char == quote:
+                if cursor + 1 < len(sql) and sql[cursor + 1] == quote:
+                    cursor += 2
+                    continue
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            if depth == 0:
+                return cursor
+            depth -= 1
+        elif depth == 0 and (char == ';' or procedural.match(sql, cursor)):
+            return cursor
+        cursor += 1
+    return len(sql)
 
 
 def _expression_name(expression: str):

@@ -324,7 +324,7 @@ def _unqualified_masked_column_diagnostics(sql: str, mapping: dict, source_diale
     }
     clauses = re.compile(
         r'\b(?:WHERE|ON|HAVING)\b(?P<body>.*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|'
-        r'\bWHERE\b|\bHAVING\b|\bRETURNING\b|;|$)',
+        r'\bWHERE\b|\bHAVING\b|\bRETURNING\b|\bTHEN\b|\bDO\b|\bLOOP\b|;|$)',
         re.IGNORECASE | re.DOTALL,
     )
     for clause in clauses.finditer(sql):

@@ -1017,6 +1017,54 @@ ORDER BY saved_report_web_id ASC;'''
         self.assertIn('"saved_reports".file_size', qualified)
         self.assertIn('ORDER BY "saved_reports".saved_report_web_id ASC', qualified)
 
+    def test_metadata_qualifies_predicates_joins_and_nested_query_scopes(self):
+        from result_metadata import qualify_unqualified_result_columns
+        columns = {
+            ('dba', 'books', 'book_id'): 'integer',
+            ('dba', 'books', 'status'): 'text',
+            ('dba', 'periods', 'period_id'): 'integer',
+            ('dba', 'periods', 'book_id'): 'integer',
+        }
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _query, params): self.params = tuple(value.lower() for value in params)
+            def fetchone(self):
+                value = columns.get(self.params)
+                return (value,) if value else None
+        class Connection:
+            def cursor(self): return Cursor()
+
+        source = '''SELECT period_id
+FROM dba.periods p
+JOIN dba.books b ON p.book_id = b.book_id
+WHERE status = 'OPEN'
+AND EXISTS (SELECT book_id FROM dba.books inner_b WHERE status = 'ACTIVE');'''
+        qualified = qualify_unqualified_result_columns(source, Connection())
+
+        self.assertIn('SELECT "p".period_id', qualified)
+        self.assertIn('WHERE "b".status', qualified)
+        self.assertIn('SELECT "inner_b".book_id', qualified)
+        self.assertIn('WHERE "inner_b".status', qualified)
+        # book_id exists in both outer tables, so an unqualified occurrence in
+        # that scope would remain unmodified for ambiguity review.
+
+    def test_metadata_uses_local_temporary_table_declarations(self):
+        from result_metadata import qualify_unqualified_result_columns
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def execute(self, _query, params): self.params = params
+            def fetchone(self): return None
+        class Connection:
+            def cursor(self): return Cursor()
+
+        source = '''CREATE TEMPORARY TABLE pg_temp.ids (item_id INTEGER, enabled SMALLINT);
+SELECT item_id FROM pg_temp.ids i WHERE enabled = 1;'''
+        qualified = qualify_unqualified_result_columns(source, Connection())
+        self.assertIn('SELECT "i".item_id', qualified)
+        self.assertIn('WHERE "i".enabled = 1', qualified)
+
     def test_join_conversion_preserves_newline_before_order_by(self):
         from migration_engine import _convert_comma_tables_to_joins
         source = '''FROM dba.TBL_1 AS one, dba.TBL_2 AS two
