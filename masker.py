@@ -168,7 +168,7 @@ def extract_query_names(text):
     # FROM, so discover each subsequent relation inside the same FROM clause.
     from_clause_pattern = re.compile(
         r'\bFROM\b(?P<body>.*?)(?=\bWHERE\b|\bGROUP\s+BY\b|\bORDER\s+BY\b|'
-        r'\bHAVING\b|\bUNION\b|\bRETURNING\b|;|$)',
+        r'\bHAVING\b|\bUNION\b|\bRETURNING\b|\b(?:DO|LOOP)\b|;|$)',
         re.IGNORECASE | re.DOTALL,
     )
     comma_relation_pattern = re.compile(
@@ -459,16 +459,48 @@ def extract_mapping_from_text(text):
 
 def replace_identifiers(text, replacements):
     sorted_pairs = sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True)
-    result = text
-    for original, replacement in sorted_pairs:
-        patterns = [
-            rf'"{re.escape(original)}"',
-            rf'\[{re.escape(original)}\]',
-            rf'(?<![\w#$@]){re.escape(original)}(?![\w#$@])',
-        ]
-        for pattern in patterns:
-            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-    return result
+    # SQL string contents are data, not identifiers.  Protect them while still
+    # allowing double-quoted identifiers to be masked and restored.
+    segments = []
+    start = 0
+    index = 0
+    while index < len(text):
+        if text[index] != "'":
+            index += 1
+            continue
+        if start < index:
+            segments.append((False, text[start:index]))
+        string_start = index
+        index += 1
+        while index < len(text):
+            if text[index] == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    index += 2
+                    continue
+                index += 1
+                break
+            index += 1
+        segments.append((True, text[string_start:index]))
+        start = index
+    if start < len(text):
+        segments.append((False, text[start:]))
+
+    result_segments = []
+    for protected, segment in segments:
+        if protected:
+            result_segments.append(segment)
+            continue
+        result = segment
+        for original, replacement in sorted_pairs:
+            patterns = [
+                rf'"{re.escape(original)}"',
+                rf'\[{re.escape(original)}\]',
+                rf'(?<![\w#$@]){re.escape(original)}(?![\w#$@])',
+            ]
+            for pattern in patterns:
+                result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        result_segments.append(result)
+    return ''.join(result_segments)
 
 
 def mask_text(text, dialect='generic', embed_mapping=True):

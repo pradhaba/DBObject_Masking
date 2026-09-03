@@ -65,7 +65,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
         working_text = _convert_asa_local_temporary_tables(working_text)
-        working_text = _convert_asa_cursor_for_loops(working_text)
+        working_text = _convert_asa_cursors(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if metadata_connection is not None and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
@@ -90,6 +90,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     inferred_result_columns = None
     diagnostics = []
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        diagnostics.extend(_asa_postgresql_construct_diagnostics(text, target_type))
         diagnostics.extend(_unqualified_masked_column_diagnostics(migrated, mapping, source_dialect))
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
@@ -155,6 +156,39 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     ) else "success"
     progress(100, 'Migration preview complete')
     return restored, mapping, skill
+
+
+def _asa_postgresql_construct_diagnostics(source: str, target_type: str) -> list[dict]:
+    """Report ASA constructs that have no approved semantics-preserving rewrite."""
+    checks = [
+        ('ASA_TOP_UNSUPPORTED', r'\bSELECT\s+TOP\s+\d+\b', 'query_limiting',
+         'ASA TOP requires a structure-aware conversion to PostgreSQL LIMIT.'),
+        ('ASA_DATEADD_UNSUPPORTED', r'\bDATEADD\s*\(', 'date_time',
+         'ASA DATEADD requires unit-aware PostgreSQL interval conversion.'),
+        ('ASA_ON_EXISTING_UNSUPPORTED', r'\bON\s+EXISTING\s+SKIP\b', 'conflict_handling',
+         'Review keys and convert ASA ON EXISTING SKIP to an appropriate ON CONFLICT clause.'),
+        ('ASA_VAREXISTS_UNSUPPORTED', r'\bVAREXISTS\s*\(', 'session_variables',
+         'Replace ASA VAREXISTS with the approved PostgreSQL session-variable accessor policy.'),
+    ]
+    if target_type == 'function':
+        checks.append(
+            ('FUNCTION_TRANSACTION_CONTROL', r'\b(?:COMMIT|ROLLBACK)\b', 'transactions',
+             'PostgreSQL functions cannot commit or roll back; remove transaction control or redesign this routine as a procedure.')
+        )
+    diagnostics = []
+    for code, pattern, category, suggestion in checks:
+        match = re.search(pattern, source, re.I)
+        if not match:
+            continue
+        diagnostics.append({
+            'code': code, 'severity': 'error', 'category': category,
+            'message': f'Unsupported ASA construct: {match.group(0).strip()}.',
+            'expression': match.group(0).strip(),
+            'line': source.count('\n', 0, match.start()) + 1,
+            'column': match.start() - source.rfind('\n', 0, match.start()),
+            'suggestion': suggestion, 'migration_continued': True, 'resolved': False,
+        })
+    return diagnostics
 
 
 def _annotate_unresolved_metadata(sql: str, diagnostics: list[dict]) -> str:
@@ -430,6 +464,10 @@ def _apply_rules_with_trace(masked_text: str, rules: list[dict], mapping, source
             })
         for rule in rules:
             if rule["rule_code"] == "asa-pg-table-aliases":
+                continue
+            if rule["rule_code"] == "asa-pg-global-int-variable":
+                # The masked-token rewrite below is quote-aware; applying this
+                # regex here would also rewrite gi_* text inside SQL literals.
                 continue
             if rule["rule_code"] == "asa-pg-schema-qualification":
                 changed, count = _qualify_schema_references(current, rule["replacement"])
@@ -1156,6 +1194,19 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     )
     body = _convert_asa_if_expressions(body)
     body = _expand_same_select_alias_references(body)
+    cursor_declarations = []
+
+    def extract_cursor_declaration(match):
+        declaration = re.sub(r'\s*;\s*$', '', match.group(0).strip())
+        cursor_declarations.append(f"    {declaration};")
+        # Preserve line count so diagnostics still point at the source line.
+        return '\n' * declaration.count('\n')
+
+    body = re.sub(
+        r'(?ims)^[ \t]*DECLARE\s+[A-Za-z_]\w*\s+(?:(?:NO\s+)?SCROLL\s+)?CURSOR\s+FOR\s+.*?;[ \t]*$',
+        extract_cursor_declaration,
+        body,
+    )
     declarations = []
     output = []
     waiting_for_assignment = False
@@ -1184,6 +1235,7 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
     # END must carry the semicolon inside that wrapper.
     normalized_body = re.sub(r'(?im)^(?P<indent>\s*)END\s*$', r'\g<indent>END;', normalized_body)
     normalized_body = re.sub(r'\bEND\s*$', 'END;', normalized_body, flags=re.IGNORECASE)
+    declarations.extend(cursor_declarations)
     return "\n".join(declarations), normalized_body
 
 
@@ -1242,8 +1294,16 @@ def _convert_asa_if_expressions(body: str) -> str:
         when_false = match.group('when_false').strip()
         return f"CASE WHEN {condition} THEN {when_true} ELSE {when_false} END"
 
-    body = compact_expression.sub(convert, body)
-    return spaced_expression.sub(lambda match: f"({convert(match)})", body)
+    # ENDIF is also ASA's procedural terminator.  Treat the compact form as an
+    # expression only when it is immediately followed by a SELECT-list alias.
+    body = re.sub(
+        compact_expression.pattern + r'(?=\s+AS\s+[A-Za-z_"])',
+        convert,
+        body,
+        flags=compact_expression.flags,
+    )
+    body = spaced_expression.sub(lambda match: f"({convert(match)})", body)
+    return re.sub(r'\bENDIF\b', 'END IF', body, flags=re.I)
 
 
 def _convert_asa_local_temporary_tables(sql: str) -> str:
@@ -1278,7 +1338,7 @@ def _convert_asa_cursor_for_loops(sql: str) -> str:
     cursor_loop = re.compile(
         r'\bFOR\s+[A-Za-z_]\w*\s+AS\s+[A-Za-z_]\w*\s+'
         r'(?:DYNAMIC\s+)?(?:SCROLL\s+)?CURSOR\s+FOR\s+'
-        r'SELECT\s+(?P<expression>.*?)\s+AS\s+(?P<target>@?[A-Za-z_]\w*)\s+'
+        r'SELECT\s+(?P<expression>(?:(?!\bFROM\b).)*?)\s+AS\s+(?P<target>@?[A-Za-z_]\w*)\s+'
         r'FROM\s+(?P<from_clause>.*?)\s+DO\s+'
         r'(?P<body>.*?)\s+END\s+FOR\s*;?',
         re.IGNORECASE | re.DOTALL,
@@ -1301,7 +1361,120 @@ def _convert_asa_cursor_for_loops(sql: str) -> str:
             "END LOOP;"
         )
 
-    return cursor_loop.sub(convert, sql)
+    converted = cursor_loop.sub(convert, sql)
+
+    # General SQL Anywhere FOR cursors expose SELECT output names as variables
+    # inside the loop. Convert innermost loops first so nesting is preserved.
+    identifier = r'"?[A-Za-z_][A-Za-z0-9_$]*"?'
+    general_header = re.compile(
+        rf'\bFOR\s+(?P<row>{identifier})\s+AS\s+{identifier}\s+'
+        r'(?:DYNAMIC\s+)?(?:SCROLL\s+)?CURSOR\s+FOR\s+'
+        r'(?P<query>SELECT\s+.*?)\s+DO\b',
+        re.I | re.S,
+    )
+    general_end = re.compile(r'\bEND\s+FOR\s*;?', re.I)
+
+    def convert_general(header, body):
+        row = header.group('row').strip('"')
+        query = header.group('query').strip()
+        select_match = re.match(r'\s*SELECT\s+(?P<list>.*?)\s+FROM\b', query, re.I | re.S)
+        outputs = []
+        if select_match:
+            for expression in _split_sql_expressions(select_match.group('list')):
+                alias = re.search(r'\s+AS\s+("?[A-Za-z_]\w*"?)\s*$', expression, re.I)
+                terminal = alias.group(1) if alias else re.search(r'("?[A-Za-z_]\w*"?)\s*$', expression)
+                if terminal:
+                    outputs.append(terminal.group(1).strip('"'))
+        body = body.strip()
+        for output in outputs:
+            pattern = re.compile(
+                rf'(?<![\w.@])"?{re.escape(output)}"?(?![\w$])'
+                r'(?!\s*(?:=|<>|!=|<=|>=|<|>))',
+                re.I,
+            )
+            protected = [
+                (item.start('columns'), item.end('columns'))
+                for item in re.finditer(
+                    r'\bINSERT\s+INTO\s+[^;(]+\s*\((?P<columns>[^()]*)\)\s*'
+                    r'(?:ON\s+EXISTING\s+SKIP\s*)?VALUES\b',
+                    body,
+                    re.I | re.S,
+                )
+            ]
+            body = pattern.sub(
+                lambda item: item.group(0) if any(start <= item.start() < end for start, end in protected)
+                else f'{row}.{output}',
+                body,
+            )
+        return f'DECLARE {row} RECORD;\nFOR {row} IN\n    {query}\nLOOP\n{body}\nEND LOOP;'
+
+    while True:
+        events = [(m.start(), 0, m) for m in general_header.finditer(converted)]
+        events += [(m.start(), 1, m) for m in general_end.finditer(converted)]
+        events.sort(key=lambda item: item[0])
+        stack = []
+        pair = None
+        for _position, kind, match in events:
+            if kind == 0:
+                stack.append(match)
+            elif stack:
+                pair = (stack.pop(), match)
+                break
+        if pair is None:
+            return converted
+        header, end = pair
+        replacement = convert_general(header, converted[header.end():end.start()])
+        converted = converted[:header.start()] + replacement + converted[end.end():]
+
+
+def _convert_asa_cursors(sql: str) -> str:
+    """Convert supported ASA cursor forms to PL/pgSQL cursor syntax.
+
+    Static SELECT cursors have a direct bound-cursor equivalent. Dynamic
+    statement cursors and CALL cursors do not, so reject them instead of
+    silently producing a routine with different behavior.
+    """
+    sql = _convert_asa_cursor_for_loops(sql)
+    cursor_options = r'(?:(?:NO\s+)?SCROLL|DYNAMIC\s+SCROLL|INSENSITIVE|SENSITIVE)\s+'
+    if re.search(rf'\bDECLARE\s+[A-Za-z_]\w*\s+(?:{cursor_options})?CURSOR\s+USING\b', sql, re.I):
+        raise ValueError('ASA dynamic CURSOR USING is not supported for PostgreSQL migration.')
+    if re.search(rf'\bDECLARE\s+[A-Za-z_]\w*\s+(?:{cursor_options})?CURSOR\s+FOR\s+CALL\b', sql, re.I):
+        raise ValueError('ASA CURSOR FOR CALL is not supported for PostgreSQL migration.')
+    if re.search(r'\bOPEN\s+[A-Za-z_]\w*\s+WITH\s+HOLD\b', sql, re.I):
+        raise ValueError('ASA cursor OPEN WITH HOLD is not supported inside PL/pgSQL routines.')
+
+    # PostgreSQL supports SCROLL/NO SCROLL, but not ASA's sensitivity words.
+    sql = re.sub(
+        r'(\bDECLARE\s+[A-Za-z_]\w*\s+)(?:DYNAMIC\s+SCROLL|SCROLL|INSENSITIVE|SENSITIVE)\s+(CURSOR\b)',
+        lambda match: f"{match.group(1)}SCROLL {match.group(2)}",
+        sql,
+        flags=re.I,
+    )
+    # ASA omits FROM between a FETCH direction and cursor name.
+    directions = r'NEXT|PRIOR|FIRST|LAST|FORWARD|BACKWARD|ABSOLUTE\s+[^\s;]+|RELATIVE\s+[^\s;]+'
+    sql = re.sub(
+        rf'\bFETCH\s+(?P<direction>{directions})\s+(?!FROM\b|IN\b)(?P<cursor>[A-Za-z_]\w*)\s+INTO\b',
+        lambda match: f"FETCH {match.group('direction')} FROM {match.group('cursor')} INTO",
+        sql,
+        flags=re.I,
+    )
+
+    # A FETCH sets FOUND in PL/pgSQL. Convert the conventional ASA EOF guard.
+    eof = r"(?:SQLSTATE\s*=\s*'02000'|SQLCODE\s*=\s*100)"
+    sql = re.sub(
+        rf'\bIF\s+{eof}\s+THEN\s+LEAVE\s+(?P<label>[A-Za-z_]\w*)\s*;?\s+END\s+IF\s*;?',
+        lambda match: f"EXIT {match.group('label')} WHEN NOT FOUND;",
+        sql,
+        flags=re.I,
+    )
+    labels = set(re.findall(r'\bEXIT\s+([A-Za-z_]\w*)\s+WHEN\s+NOT\s+FOUND', sql, re.I))
+    for label in labels:
+        sql = re.sub(
+            rf'(?im)^(?P<indent>\s*){re.escape(label)}\s*:\s*LOOP\b',
+            rf'\g<indent><<{label}>>\n\g<indent>LOOP',
+            sql,
+        )
+    return sql
 
 
 def _expand_same_select_alias_references(sql: str) -> str:
@@ -1337,12 +1510,27 @@ def _expand_same_select_alias_references(sql: str) -> str:
 
 def _rewrite_asa_global_accessors(sql: str) -> str:
     """Translate ASA integer session globals to the PostgreSQL getter."""
-    return re.sub(
-        r'(?<![\w.$])(?P<name>gi_[A-Za-z0-9_$]+)(?![\w$])',
-        lambda match: f"dba.get_int_var('{match.group('name')}')",
-        sql,
-        flags=re.IGNORECASE,
-    )
+    pattern = re.compile(r'(?<![\w.$])(?P<name>gi_[A-Za-z0-9_$]+)(?![\w$])', re.I)
+    output, start, index = [], 0, 0
+    while index < len(sql):
+        if sql[index] != "'":
+            index += 1
+            continue
+        output.append(pattern.sub(lambda m: f"dba.get_int_var('{m.group('name')}')", sql[start:index]))
+        literal_start = index
+        index += 1
+        while index < len(sql):
+            if sql[index] == "'":
+                if index + 1 < len(sql) and sql[index + 1] == "'":
+                    index += 2
+                    continue
+                index += 1
+                break
+            index += 1
+        output.append(sql[literal_start:index])
+        start = index
+    output.append(pattern.sub(lambda m: f"dba.get_int_var('{m.group('name')}')", sql[start:]))
+    return ''.join(output)
 
 
 def _rewrite_masked_asa_global_accessors(sql: str, mapping: dict) -> str:

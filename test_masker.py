@@ -895,6 +895,68 @@ $$;'''
         self.assertIn('END LOOP;', converted)
         self.assertNotRegex(converted, r'(?i)DYNAMIC\s+SCROLL|END\s+FOR')
 
+    def test_explicit_asa_cursor_is_converted_to_plpgsql(self):
+        from migration_engine import _convert_asa_cursors, render_postgresql_routine
+
+        source = '''CREATE PROCEDURE dba.update_items()
+        BEGIN
+        DECLARE item_cursor DYNAMIC SCROLL CURSOR FOR
+            SELECT id, amount
+            FROM dba.items;
+        DECLARE item_id INTEGER;
+        DECLARE item_amount NUMERIC(12,2);
+        OPEN item_cursor;
+        read_items: LOOP
+            FETCH NEXT item_cursor INTO item_id, item_amount;
+            IF SQLSTATE = '02000' THEN LEAVE read_items; END IF;
+            UPDATE dba.items SET amount = item_amount WHERE id = item_id;
+        END LOOP;
+        CLOSE item_cursor;
+        END;'''
+
+        converted = _convert_asa_cursors(source)
+        rendered, _, _ = render_postgresql_routine(converted, 'procedure')
+
+        self.assertIn('item_cursor SCROLL CURSOR FOR\n            SELECT id, amount', rendered)
+        self.assertIn('FETCH NEXT FROM item_cursor INTO item_id, item_amount;', rendered)
+        self.assertIn('<<read_items>>', rendered)
+        self.assertIn('EXIT read_items WHEN NOT FOUND;', rendered)
+        self.assertIn('CLOSE item_cursor;', rendered)
+        self.assertNotRegex(rendered, r"(?i)SQLSTATE\s*=\s*'02000'|\bLEAVE\b")
+
+    def test_dynamic_asa_cursor_is_rejected(self):
+        from migration_engine import _convert_asa_cursors
+
+        with self.assertRaisesRegex(ValueError, 'CURSOR USING'):
+            _convert_asa_cursors('DECLARE c CURSOR USING statement_text;')
+
+    def test_nested_asa_cursor_loops_convert_innermost_first(self):
+        from migration_engine import _convert_asa_cursors
+
+        source = '''FOR f AS c DYNAMIC SCROLL CURSOR FOR SELECT book_id FROM books DO
+        FOR f1 AS c1 DYNAMIC SCROLL CURSOR FOR SELECT period_id FROM periods
+        WHERE book_id = book_id DO
+        INSERT INTO target(period_id) VALUES(period_id);
+        END FOR;
+        END FOR;'''
+        converted = _convert_asa_cursors(source)
+
+        self.assertNotRegex(converted, r'(?i)\bCURSOR\s+FOR\b|\bEND\s+FOR\b')
+        self.assertIn('DECLARE f RECORD;', converted)
+        self.assertIn('DECLARE f1 RECORD;', converted)
+        self.assertIn('VALUES(f1.period_id)', converted)
+        self.assertIn('target(period_id)', converted)
+
+    def test_asa_function_reports_unconverted_constructs_and_commit(self):
+        from migration_engine import _asa_postgresql_construct_diagnostics
+
+        source = "SELECT TOP 1 DATEADD(dd,-1,d); INSERT INTO t ON EXISTING SKIP VALUES (1); VAREXISTS('g'); COMMIT;"
+        codes = {item['code'] for item in _asa_postgresql_construct_diagnostics(source, 'function')}
+        self.assertEqual(codes, {
+            'ASA_TOP_UNSUPPORTED', 'ASA_DATEADD_UNSUPPORTED', 'ASA_ON_EXISTING_UNSUPPORTED',
+            'ASA_VAREXISTS_UNSUPPORTED', 'FUNCTION_TRANSACTION_CONTROL',
+        })
+
     def test_metadata_resolver_knows_nested_asa_string_return_type(self):
         from result_metadata import _resolve_expression
         class Cursor:
