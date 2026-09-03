@@ -61,6 +61,41 @@ CREATE TABLE IF NOT EXISTS processing_runs (
     error_message TEXT,
     processed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_catalog_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    source_dialect TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    source_sql TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS source_catalog_objects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES source_catalog_snapshots(id) ON DELETE CASCADE,
+    schema_name TEXT NOT NULL,
+    object_name TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    definition_text TEXT NOT NULL DEFAULT '',
+    UNIQUE(snapshot_id, schema_name, object_name)
+);
+CREATE TABLE IF NOT EXISTS source_catalog_columns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id INTEGER NOT NULL REFERENCES source_catalog_objects(id) ON DELETE CASCADE,
+    column_name TEXT NOT NULL,
+    ordinal_position INTEGER NOT NULL,
+    data_type TEXT NOT NULL,
+    character_maximum_length INTEGER,
+    numeric_precision INTEGER,
+    numeric_scale INTEGER,
+    is_nullable INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(object_id, column_name)
+);
+CREATE TABLE IF NOT EXISTS source_catalog_dependencies (
+    snapshot_id INTEGER NOT NULL REFERENCES source_catalog_snapshots(id) ON DELETE CASCADE,
+    schema_name TEXT NOT NULL,
+    object_name TEXT NOT NULL,
+    reference_kind TEXT NOT NULL DEFAULT 'relation',
+    PRIMARY KEY(snapshot_id, schema_name, object_name)
+);
 CREATE TABLE IF NOT EXISTS masking_rules (
     object_type TEXT PRIMARY KEY,
     token_prefix TEXT NOT NULL,
@@ -143,6 +178,8 @@ CREATE TABLE IF NOT EXISTS skill_regression_results (
 );
 CREATE INDEX IF NOT EXISTS idx_objects_project ON project_objects(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project ON processing_runs(project_id, processed_at);
+CREATE INDEX IF NOT EXISTS idx_source_catalog_project ON source_catalog_snapshots(project_id, captured_at);
+CREATE INDEX IF NOT EXISTS idx_source_columns_name ON source_catalog_columns(column_name);
 """
 
 PROJECT_COLUMNS = {

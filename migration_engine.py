@@ -11,7 +11,7 @@ from masker import mask_text, unmask_text
 
 def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
                  target_override="auto", metadata_connection=None, formatter_indent="4 spaces",
-                 progress_callback=None):
+                 progress_callback=None, source_catalog=None):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     progress = progress_callback or (lambda _percent, _status: None)
     progress(3, 'Preparing and validating source DDL')
@@ -67,8 +67,10 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         working_text = _convert_asa_local_temporary_tables(working_text)
         working_text = _convert_asa_cursors(working_text)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
-        if metadata_connection is not None and source_scalar_return_type is None:
-            working_text = qualify_unqualified_result_columns(working_text, metadata_connection)
+        if (metadata_connection is not None or source_catalog is not None) and source_scalar_return_type is None:
+            working_text = qualify_unqualified_result_columns(
+                working_text, metadata_connection or object(), source_catalog=source_catalog
+            )
             working_text = _cast_literals_for_unique_function_overloads(working_text, metadata_connection)
         working_text = align_result_selects(working_text)
         # ASA permits a result alias to be reused by expressions later in the

@@ -81,7 +81,7 @@ def align_result_selects(sql: str) -> str:
     return sql
 
 
-def qualify_unqualified_result_columns(sql: str, connection, default_schema: str = "dba") -> str:
+def qualify_unqualified_result_columns(sql: str, connection, default_schema: str = "dba", source_catalog=None) -> str:
     """Qualify unqualified columns throughout every SELECT query scope.
 
     A name is bound only when exactly one table visible to that SELECT contains
@@ -99,6 +99,10 @@ def qualify_unqualified_result_columns(sql: str, connection, default_schema: str
         local = local_columns.get(table.lower(), {})
         if column.lower() in local:
             return local[column.lower()]
+        if source_catalog is not None:
+            source_type = source_catalog.column_type(schema, table, column)
+            if source_type:
+                return source_type
         if not hasattr(connection, 'cursor'):
             return None
         key = (schema.lower(), table.lower(), column.lower())

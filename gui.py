@@ -50,8 +50,26 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
     if selected_action == 'migrate' and project is not None:
         from migration_engine import migrate_text
         metadata_connection = None
+        source_metadata_connection = None
+        source_catalog = None
         update_processing_progress(run_context, 1, 'Starting Test Migrate')
         try:
+            if source_dialect == 'sybase_asa':
+                update_processing_progress(run_context, 2, 'Discovering referenced ASA objects')
+                from workflow import cache_project_password, get_project_password, open_database_connection
+                source_password = get_project_password(project.id, 'source') or getattr(project, 'source_password', None)
+                if not source_password:
+                    source_password = simpledialog.askstring('SQL Anywhere metadata', 'Source password:', show='*')
+                    if source_password is None:return
+                    cache_project_password(project.id, source_password, 'source')
+                source_metadata_connection = open_database_connection(
+                    project.source_database,
+                    {'host': project.host, 'port': project.port, 'database': project.database, 'username': project.username},
+                    source_password,
+                )
+                from source_catalog import capture_source_catalog
+                source_catalog = capture_source_catalog(source_metadata_connection, project.id, ddl_text)
+                update_processing_progress(run_context, 5, 'Stored ASA object definitions in SQLite')
             if target_dialect == 'postgresql':
                 update_processing_progress(run_context, 2, 'Connecting to PostgreSQL metadata')
                 from workflow import cache_project_password, get_project_password
@@ -79,6 +97,7 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
                 progress_callback=lambda percent, status: update_processing_progress(
                     run_context, percent, status
                 ),
+                source_catalog=source_catalog,
             )
         except Exception as exc:
             update_processing_progress(run_context, 100, 'Migration preview failed')
@@ -100,6 +119,8 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         finally:
             if metadata_connection is not None:
                 metadata_connection.close()
+            if source_metadata_connection is not None:
+                source_metadata_connection.close()
         set_readonly_text(target_text, migrated_text)
         set_readonly_text(mapping_text, json.dumps(mapping, indent=2, sort_keys=True))
         set_readonly_text(skill_text, format_skill_trace(skill))
