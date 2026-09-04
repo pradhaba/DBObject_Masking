@@ -941,11 +941,37 @@ $$;'''
         END FOR;'''
         converted = _convert_asa_cursors(source)
 
-        self.assertNotRegex(converted, r'(?i)\bCURSOR\s+FOR\b|\bEND\s+FOR\b')
-        self.assertIn('DECLARE f RECORD;', converted)
-        self.assertIn('DECLARE f1 RECORD;', converted)
-        self.assertIn('VALUES(f1.period_id)', converted)
+        self.assertNotRegex(converted, r'(?i)\bEND\s+FOR\b')
+        self.assertIn('DECLARE asa_loop_f RECORD;', converted)
+        self.assertIn('DECLARE asa_loop_f1 RECORD;', converted)
+        self.assertIn('FOR asa_loop_f IN', converted)
+        self.assertIn('FOR asa_loop_f1 IN', converted)
+        self.assertIn('VALUES(asa_loop_f1.period_id)', converted)
         self.assertIn('target(period_id)', converted)
+
+    def test_correlated_nested_query_loop_uses_declared_records(self):
+        from migration_engine import _convert_asa_cursors, _normalize_plpgsql_body
+
+        source = '''FOR f AS c CURSOR FOR SELECT book_id FROM books DO
+        FOR f1 AS c1 CURSOR FOR SELECT period_id FROM periods
+        WHERE book_id = book_id DO
+        INSERT INTO target(period_id) VALUES(period_id);
+        END FOR;
+        END FOR;'''
+        converted = _convert_asa_cursors(source)
+        declarations, body = _normalize_plpgsql_body(converted)
+
+        self.assertIn('asa_loop_f RECORD;', declarations)
+        self.assertIn('asa_loop_f1 RECORD;', declarations)
+        self.assertRegex(body, r'(?s)FOR asa_loop_f IN.*FOR asa_loop_f1 IN.*asa_loop_f\.book_id')
+
+    def test_generated_loop_record_names_have_three_characters_after_underscore(self):
+        from migration_engine import _postgres_loop_record_name
+
+        self.assertEqual(_postgres_loop_record_name('f'), '_rec')
+        self.assertEqual(_postgres_loop_record_name('f1'), '_rc1')
+        self.assertEqual(_postgres_loop_record_name('f2'), '_rc2')
+        self.assertEqual(_postgres_loop_record_name('x'), '_xxx')
 
     def test_asa_function_reports_unconverted_constructs_and_commit(self):
         from migration_engine import _asa_postgresql_construct_diagnostics

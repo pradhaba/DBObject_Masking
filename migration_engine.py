@@ -140,6 +140,13 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     else:
         routine_language = None
     restored = unmask_text(migrated, mapping, target_dialect)
+    if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        restored = re.sub(
+            r'\b_?asa_loop_([A-Za-z_][A-Za-z0-9_$]*)\b',
+            lambda match: _postgres_loop_record_name(match.group(1)),
+            restored,
+            flags=re.IGNORECASE,
+        )
     if target_dialect == "postgresql":
         progress(88, 'Formatting and validating migration draft')
         from cte_analyzer import apply_readability_ctes
@@ -1222,7 +1229,7 @@ def _normalize_plpgsql_body(body: str) -> tuple[str, str]:
         return '\n' * declaration.count('\n')
 
     body = re.sub(
-        r'(?ims)^[ \t]*DECLARE\s+[A-Za-z_]\w*\s+(?:(?:NO\s+)?SCROLL\s+)?CURSOR\s+FOR\s+.*?;[ \t]*$',
+        r'(?ims)^[ \t]*DECLARE[ \t]+[A-Za-z_]\w*\s+(?:(?:NO\s+)?SCROLL\s+)?CURSOR\s+FOR\s+.*?;[ \t]*$',
         extract_cursor_declaration,
         body,
     )
@@ -1394,7 +1401,11 @@ def _convert_asa_cursor_for_loops(sql: str) -> str:
     general_end = re.compile(r'\bEND\s+FOR\s*;?', re.I)
 
     def convert_general(header, body):
-        row = header.group('row').strip('"')
+        source_row = header.group('row').strip('"')
+        # The sentinel keeps generated loop records separate from ordinary ASA
+        # variables while identifiers are masked. It is restored to the exact
+        # source cursor-row name after unmasking.
+        row = f'asa_loop_{source_row}'
         query = header.group('query').strip()
         select_match = re.match(r'\s*SELECT\s+(?P<list>.*?)\s+FROM\b', query, re.I | re.S)
         outputs = []
@@ -1444,6 +1455,19 @@ def _convert_asa_cursor_for_loops(sql: str) -> str:
         header, end = pair
         replacement = convert_general(header, converted[header.end():end.start()])
         converted = converted[:header.start()] + replacement + converted[end.end():]
+
+
+def _postgres_loop_record_name(source_name: str) -> str:
+    """Return a generated loop identifier with at least three characters after _."""
+    suffix = re.fullmatch(r'f(\d+)', source_name, re.IGNORECASE)
+    if source_name.lower() == 'f':
+        stem = 'rec'
+    elif suffix:
+        stem = f"rc{suffix.group(1)}"
+    else:
+        stem = re.sub(r'[^A-Za-z0-9_$]', '', source_name).lower() or 'rec'
+        stem = stem + ('x' * max(0, 3 - len(stem)))
+    return f'_{stem}'
 
 
 def _convert_asa_cursors(sql: str) -> str:
