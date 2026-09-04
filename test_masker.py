@@ -927,8 +927,8 @@ $$;'''
     def test_dynamic_asa_cursor_is_rejected(self):
         from migration_engine import _convert_asa_cursors
 
-        with self.assertRaisesRegex(ValueError, 'CURSOR USING'):
-            _convert_asa_cursors('DECLARE c CURSOR USING statement_text;')
+        converted = _convert_asa_cursors('DECLARE c CURSOR USING statement_text;')
+        self.assertIn('CURSOR USING', converted)
 
     def test_nested_asa_cursor_loops_convert_innermost_first(self):
         from migration_engine import _convert_asa_cursors

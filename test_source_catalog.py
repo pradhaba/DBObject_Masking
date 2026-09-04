@@ -19,13 +19,13 @@ class SourceCatalogTests(unittest.TestCase):
                 self.query, self.params = query, tuple(value.lower() for value in params)
                 return self
             def fetchall(self):
-                if 'INFORMATION_SCHEMA.COLUMNS' in self.query and self.params == ('dba', 'a_periods'):
+                if 'SYS.SYSTABCOL' in self.query and self.params == ('dba', 'a_periods'):
                     return [('period_id', 1, 'integer', None, 32, 0, 'NO'),
                             ('app_book_id', 2, 'integer', None, 32, 0, 'YES')]
                 return []
             def fetchone(self):
-                if 'INFORMATION_SCHEMA.TABLES' in self.query:
-                    return ('BASE TABLE',)
+                if 'SYS.SYSVIEW' in self.query:
+                    return ('BASE', None)
                 return None
             def close(self): pass
         class Connection:

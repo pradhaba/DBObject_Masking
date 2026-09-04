@@ -65,7 +65,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
         working_text = _convert_asa_local_temporary_tables(working_text)
-        working_text = _convert_asa_cursors(working_text)
+        from asa_control_flow import convert_asa_control_flow
+        working_text = convert_asa_control_flow(working_text, _convert_asa_cursors)
         from result_metadata import align_result_selects, qualify_unqualified_result_columns
         if (metadata_connection is not None or source_catalog is not None) and source_scalar_return_type is None:
             working_text = qualify_unqualified_result_columns(
@@ -93,6 +94,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     diagnostics = []
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         diagnostics.extend(_asa_postgresql_construct_diagnostics(text, target_type))
+        from asa_control_flow import control_flow_diagnostics
+        diagnostics.extend(control_flow_diagnostics(text, working_text))
         diagnostics.extend(_unqualified_masked_column_diagnostics(migrated, mapping, source_dialect))
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
@@ -1438,13 +1441,6 @@ def _convert_asa_cursors(sql: str) -> str:
     """
     sql = _convert_asa_cursor_for_loops(sql)
     cursor_options = r'(?:(?:NO\s+)?SCROLL|DYNAMIC\s+SCROLL|INSENSITIVE|SENSITIVE)\s+'
-    if re.search(rf'\bDECLARE\s+[A-Za-z_]\w*\s+(?:{cursor_options})?CURSOR\s+USING\b', sql, re.I):
-        raise ValueError('ASA dynamic CURSOR USING is not supported for PostgreSQL migration.')
-    if re.search(rf'\bDECLARE\s+[A-Za-z_]\w*\s+(?:{cursor_options})?CURSOR\s+FOR\s+CALL\b', sql, re.I):
-        raise ValueError('ASA CURSOR FOR CALL is not supported for PostgreSQL migration.')
-    if re.search(r'\bOPEN\s+[A-Za-z_]\w*\s+WITH\s+HOLD\b', sql, re.I):
-        raise ValueError('ASA cursor OPEN WITH HOLD is not supported inside PL/pgSQL routines.')
-
     # PostgreSQL supports SCROLL/NO SCROLL, but not ASA's sensitivity words.
     sql = re.sub(
         r'(\bDECLARE\s+[A-Za-z_]\w*\s+)(?:DYNAMIC\s+SCROLL|SCROLL|INSENSITIVE|SENSITIVE)\s+(CURSOR\b)',

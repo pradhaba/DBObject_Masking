@@ -98,11 +98,14 @@ def _fetch_columns(connection, schema: str, table: str) -> list[tuple]:
     cursor = connection.cursor()
     try:
         cursor.execute(
-            """SELECT COLUMN_NAME, ORDINAL_POSITION, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
-                      NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE
-               FROM INFORMATION_SCHEMA.COLUMNS
-               WHERE LOWER(TABLE_SCHEMA)=LOWER(?) AND LOWER(TABLE_NAME)=LOWER(?)
-               ORDER BY ORDINAL_POSITION""",
+            """SELECT c.column_name, c.column_id, c.base_type_str,
+                      c.width, c.width, c.scale,
+                      CASE WHEN c.nulls = 'Y' THEN 'YES' ELSE 'NO' END
+               FROM SYS.SYSTAB t
+               JOIN SYS.SYSUSER u ON u.user_id = t.creator
+               JOIN SYS.SYSTABCOL c ON c.table_id = t.table_id
+               WHERE LOWER(u.user_name)=LOWER(?) AND LOWER(t.table_name)=LOWER(?)
+               ORDER BY c.column_id""",
             (schema, table),
         )
         return list(cursor.fetchall())
@@ -116,21 +119,16 @@ def _fetch_object_definition(connection, schema: str, table: str) -> tuple[str, 
     cursor = connection.cursor()
     try:
         cursor.execute(
-            """SELECT TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES
-               WHERE LOWER(TABLE_SCHEMA)=LOWER(?) AND LOWER(TABLE_NAME)=LOWER(?)""",
+            """SELECT t.table_type_str, v.view_def
+               FROM SYS.SYSTAB t
+               JOIN SYS.SYSUSER u ON u.user_id = t.creator
+               LEFT JOIN SYS.SYSVIEW v ON v.view_object_id = t.object_id
+               WHERE LOWER(u.user_name)=LOWER(?) AND LOWER(t.table_name)=LOWER(?)""",
             (schema, table),
         )
         row = cursor.fetchone()
-        object_type = str(row[0]).lower().replace('base ', '') if row else 'missing'
-        definition = ''
-        if 'view' in object_type:
-            cursor.execute(
-                """SELECT VIEW_DEFINITION FROM INFORMATION_SCHEMA.VIEWS
-                   WHERE LOWER(TABLE_SCHEMA)=LOWER(?) AND LOWER(TABLE_NAME)=LOWER(?)""",
-                (schema, table),
-            )
-            view = cursor.fetchone()
-            definition = str(view[0]) if view and view[0] is not None else ''
+        object_type = str(row[0]).lower().replace('base', 'table') if row else 'missing'
+        definition = str(row[1]) if row and len(row) > 1 and row[1] is not None else ''
         return object_type, definition
     finally:
         close = getattr(cursor, 'close', None)
