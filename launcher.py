@@ -484,10 +484,10 @@ class Launcher:
         self._activate("settings")
         self.clear(); self.heading("Edit project" if project else "Create project", "Connection details define the source and migration target. Passwords are never saved.")
         form = ttk.Frame(self.container); form.pack(anchor=tk.NW, fill=tk.X)
-        defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"postgres", "target_username":"", "target_password":"", "formatter_indent":"4 spaces"}
+        defaults = {"name":"", "operation":"migrate", "scope":"all", "source":"SQL Anywhere ASA", "target":"PostgreSQL", "host":"localhost", "port":"2638", "database":"", "username":"", "password":"", "target_host":"localhost", "target_port":"5432", "target_database":"postgres", "target_username":"", "target_password":"", "formatter_indent":"4 spaces", "source_available": True}
         if project is not None:
-            defaults.update({"name":project.name,"operation":project.default_operation,"scope":project.object_scope,"source":project.source_database,"target":project.target_database,"host":project.host,"port":str(project.port),"database":project.database,"username":project.username,"target_host":project.target_host or "localhost","target_port":str(project.target_port or 5432),"target_database":project.target_database_name or "postgres","target_username":project.target_username,"target_password":getattr(project,"target_password",""),"formatter_indent":project.formatter_indent or "4 spaces"})
-        vars_ = {key: tk.StringVar(value=value) for key, value in defaults.items()}
+            defaults.update({"name":project.name,"operation":project.default_operation,"scope":project.object_scope,"source":project.source_database,"target":project.target_database,"host":project.host,"port":str(project.port),"database":project.database,"username":project.username,"target_host":project.target_host or "localhost","target_port":str(project.target_port or 5432),"target_database":project.target_database_name or "postgres","target_username":project.target_username,"target_password":getattr(project,"target_password",""),"formatter_indent":project.formatter_indent or "4 spaces", "source_available":getattr(project, "source_available", True)})
+        vars_ = {key: (tk.BooleanVar(value=value) if key == "source_available" else tk.StringVar(value=value)) for key, value in defaults.items()}
         fields = [("Project name","name"),("Purpose","operation"),("Object scope","scope"),("Source dialect","source"),("Target dialect","target"),("Source host","host"),("Source port","port"),("Source database / service","database"),("Source username","username"),("Source password","password"),("Target host","target_host"),("Target port","target_port"),("Target database","target_database"),("Target username","target_username"),("Target password","target_password"),("PostgreSQL indentation","formatter_indent")]
         for row, (label, key) in enumerate(fields):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0,18), pady=7)
@@ -502,13 +502,20 @@ class Launcher:
             else:
                 widget = ttk.Entry(form, textvariable=vars_[key], width=45, show="*" if key in {"password", "target_password"} else "")
             widget.grid(row=row, column=1, sticky=tk.W, pady=7)
-        status = ttk.Label(form, text=""); status.grid(row=len(fields), column=0, columnspan=2, sticky=tk.W, pady=8)
+        ttk.Checkbutton(
+            form, text="Source database is available (capture object definitions before migration)",
+            variable=vars_["source_available"]
+        ).grid(row=len(fields), column=0, columnspan=2, sticky=tk.W, pady=7)
+        status = ttk.Label(form, text=""); status.grid(row=len(fields) + 1, column=0, columnspan=2, sticky=tk.W, pady=8)
         def details():
-            if not all(vars_[key].get().strip() for key in ("name","host","port","database","username")):
+            required = ("name", "host", "port", "database", "username") if vars_["source_available"].get() else ("name",)
+            if not all(vars_[key].get().strip() for key in required):
                 raise ValueError("Complete all required fields.")
-            return dict(name=vars_["name"].get().strip(), default_operation=vars_["operation"].get(), object_scope=vars_["scope"].get(), source_database=vars_["source"].get(), target_database=vars_["target"].get(), host=vars_["host"].get().strip(), port=int(vars_["port"].get()), database=vars_["database"].get().strip(), username=vars_["username"].get().strip(), target_host=vars_["target_host"].get().strip(), target_port=int(vars_["target_port"].get()), target_database_name=vars_["target_database"].get().strip(), target_username=vars_["target_username"].get().strip(), formatter_indent=vars_["formatter_indent"].get())
+            return dict(name=vars_["name"].get().strip(), default_operation=vars_["operation"].get(), object_scope=vars_["scope"].get(), source_database=vars_["source"].get(), target_database=vars_["target"].get(), host=vars_["host"].get().strip(), port=int(vars_["port"].get() or 2638), database=vars_["database"].get().strip(), username=vars_["username"].get().strip(), target_host=vars_["target_host"].get().strip(), target_port=int(vars_["target_port"].get()), target_database_name=vars_["target_database"].get().strip(), target_username=vars_["target_username"].get().strip(), formatter_indent=vars_["formatter_indent"].get(), source_available=vars_["source_available"].get())
         def test():
             try:
+                if not vars_["source_available"].get():
+                    status.config(text="Source is marked unavailable; metadata lookup will be skipped.", foreground="blue"); return
                 data=details(); test_database_connection(data["source_database"], data, vars_["password"].get()); status.config(text="Connection successful", foreground="green")
             except Exception as exc: status.config(text=str(exc), foreground="red")
         def test_target():

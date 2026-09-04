@@ -54,7 +54,8 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         source_catalog = None
         update_processing_progress(run_context, 1, 'Starting Test Migrate')
         try:
-            if source_dialect == 'sybase_asa':
+            source_available = bool(getattr(project, 'source_available', True))
+            if source_dialect == 'sybase_asa' and source_available:
                 update_processing_progress(run_context, 2, 'Discovering referenced ASA objects')
                 from workflow import cache_project_password, get_project_password, open_database_connection
                 source_password = get_project_password(project.id, 'source') or getattr(project, 'source_password', None)
@@ -98,6 +99,7 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
                     run_context, percent, status
                 ),
                 source_catalog=source_catalog,
+                source_available=source_available,
             )
         except Exception as exc:
             update_processing_progress(run_context, 100, 'Migration preview failed')
@@ -147,7 +149,10 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
         )
         if project is not None and run_context is not None and run_context.get('test_plan_callback'):
             run_context['test_plan_callback'](project, ddl_text, migrated_text)
-        issue_count = len([item for item in skill.get('diagnostics', []) if not item.get('resolved')])
+        issue_count = len([
+            item for item in skill.get('diagnostics', [])
+            if not item.get('resolved') and item.get('severity') == 'error'
+        ])
         if issue_count:
             messagebox.showwarning(
                 'Migration needs modification',

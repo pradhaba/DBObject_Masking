@@ -35,6 +35,16 @@ class WorkflowTests(unittest.TestCase):
             connection.close()
         self.assertNotIn('password', columns)
 
+    def test_source_unavailable_setting_round_trips(self):
+        project = Project(
+            'p-offline', 'Offline', 'SQL Anywhere ASA', 'PostgreSQL',
+            '', 2638, '', '', 'now', source_available=False
+        )
+        path = self.root / 'offline.sqlite3'
+        save_projects([project], path)
+        loaded = load_projects(path)[0]
+        self.assertFalse(loaded.source_available)
+
     def test_remove_project_deletes_record_and_workspace_copies(self):
         workspace_root = self.root / 'workspaces'
         workspace = workspace_root / 'p-remove'

@@ -11,7 +11,7 @@ from masker import mask_text, unmask_text
 
 def migrate_text(text: str, source_dialect: str, target_dialect: str, database_path=None,
                  target_override="auto", metadata_connection=None, formatter_indent="4 spaces",
-                 progress_callback=None, source_catalog=None):
+                 progress_callback=None, source_catalog=None, source_available=True):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     progress = progress_callback or (lambda _percent, _status: None)
     progress(3, 'Preparing and validating source DDL')
@@ -64,6 +64,11 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
+        preliminary_target_type = classify_postgresql_routine(text, target_override)[0]
+        from asa_postgresql_rewrites import convert_asa_postgresql_constructs
+        working_text, structural_trace = convert_asa_postgresql_constructs(
+            working_text, preliminary_target_type
+        )
         working_text = _convert_asa_local_temporary_tables(working_text)
         from asa_control_flow import convert_asa_control_flow
         working_text = convert_asa_control_flow(working_text, _convert_asa_cursors)
@@ -93,10 +98,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     inferred_result_columns = None
     diagnostics = []
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
-        diagnostics.extend(_asa_postgresql_construct_diagnostics(text, target_type))
+        diagnostics.extend(_asa_postgresql_construct_diagnostics(text, target_type, working_text))
         from asa_control_flow import control_flow_diagnostics
         diagnostics.extend(control_flow_diagnostics(text, working_text))
-        diagnostics.extend(_unqualified_masked_column_diagnostics(migrated, mapping, source_dialect))
+        diagnostics.extend(_unqualified_masked_column_diagnostics(
+            migrated, mapping, source_dialect, source_available=source_available
+        ))
     if (target_type == "function" and target_dialect == "postgresql"
             and metadata_connection is not None and source_scalar_return_type is None):
         progress(62, 'Resolving PostgreSQL column and function metadata')
@@ -123,6 +130,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
             migrated, target_type, inferred_result_columns
         )
         trace.extend(renderer_trace)
+        trace[0:0] = structural_trace
         if dynamic_inline_count:
             trace.insert(0, {
                 "line": "preprocessor", "source": "SET dynamic SQL; EXECUTE IMMEDIATE",
@@ -163,10 +171,10 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     return restored, mapping, skill
 
 
-def _asa_postgresql_construct_diagnostics(source: str, target_type: str) -> list[dict]:
+def _asa_postgresql_construct_diagnostics(source: str, target_type: str, converted: str | None = None) -> list[dict]:
     """Report ASA constructs that have no approved semantics-preserving rewrite."""
     checks = [
-        ('ASA_TOP_UNSUPPORTED', r'\bSELECT\s+TOP\s+\d+\b', 'query_limiting',
+        ('ASA_TOP_UNSUPPORTED', r'\bSELECT\s+(?:TOP\s+\d+|FIRST)\b', 'query_limiting',
          'ASA TOP requires a structure-aware conversion to PostgreSQL LIMIT.'),
         ('ASA_DATEADD_UNSUPPORTED', r'\bDATEADD\s*\(', 'date_time',
          'ASA DATEADD requires unit-aware PostgreSQL interval conversion.'),
@@ -182,7 +190,7 @@ def _asa_postgresql_construct_diagnostics(source: str, target_type: str) -> list
         )
     diagnostics = []
     for code, pattern, category, suggestion in checks:
-        match = re.search(pattern, source, re.I)
+        match = re.search(pattern, converted if converted is not None else source, re.I)
         if not match:
             continue
         diagnostics.append({
@@ -320,7 +328,8 @@ def _recoverable_migration_diagnostic(source: str, error: ValueError, expression
     }
 
 
-def _unqualified_masked_column_diagnostics(sql: str, mapping: dict, source_dialect: str) -> list[dict]:
+def _unqualified_masked_column_diagnostics(
+        sql: str, mapping: dict, source_dialect: str, source_available: bool = True) -> list[dict]:
     """Flag predicate columns whose owning relation cannot be inferred offline."""
     issues = []
     seen = set()
@@ -340,13 +349,18 @@ def _unqualified_masked_column_diagnostics(sql: str, mapping: dict, source_diale
             seen.add(token.lower())
             expression = unmask_text(token, mapping, source_dialect)
             issues.append({
-                'code': 'UNQUALIFIED_COLUMN_REVIEW', 'severity': 'error',
+                'code': 'UNQUALIFIED_COLUMN_REVIEW',
+                'severity': 'error' if source_available else 'warning',
                 'category': 'column_qualification',
                 'message': f'Unable to determine the source table for unqualified column {expression}.',
                 'expression': expression,
                 'line': sql.count('\n', 0, clause.start('body') + match.start()) + 1,
                 'column': None,
-                'suggestion': 'Qualify the source column with its table name and run Test Migrate again.',
+                'suggestion': (
+                    'Qualify the source column with its table name and run Test Migrate again.'
+                    if source_available else
+                    'Source metadata was marked unavailable. Review or qualify this column before deployment.'
+                ),
                 'migration_continued': True, 'resolved': False,
             })
     return issues

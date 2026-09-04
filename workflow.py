@@ -53,11 +53,14 @@ class Project:
     target_database_name: str = ""
     target_username: str = ""
     formatter_indent: str = "4 spaces"
+    source_available: bool = True
 
     @classmethod
     def from_dict(cls, value: dict) -> "Project":
         allowed = cls.__dataclass_fields__.keys()
-        return cls(**{key: value.get(key, "") for key in allowed})
+        result = {key: value.get(key, "") for key in allowed}
+        result["source_available"] = bool(value.get("source_available", 1))
+        return cls(**result)
 
 
 def slugify(value: str) -> str:
