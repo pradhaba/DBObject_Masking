@@ -75,3 +75,20 @@ git stash list
 Because stash pop conflicted, Git normally keeps the stash. Once the application and project data are verified, remove it with:
 git stash drop 'stash@{0}'
 Be sure to use the exact filename shown by git status. The repository filename is normally data/ddl_masker.sqlite3—with one l in sqlite3.
+========================================================================================
+No. This conflict happened because data/ddl_masker.sqlite3 is already tracked by Git, even though it appears in .gitignore. .gitignore does not stop tracking a file that was committed previously.
+We should remove the runtime database from Git tracking once:
+git rm --cached data/ddl_masker.sqlite3
+git commit -m "Stop tracking local SQLite runtime database"
+git push origin main
+This does not delete the working database from the machine; --cached removes it only from Git’s index.
+On the other computer, preserve its database before pulling:
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\DBObject_Masking"
+Copy-Item "data\ddl_masker.sqlite3" "$env:LOCALAPPDATA\DBObject_Masking\ddl_masker.sqlite3"
+git pull origin main
+After that:
+Git synchronizes source code and JSON catalogue releases.
+Each computer uses its own %LOCALAPPDATA%\DBObject_Masking\ddl_masker.sqlite3.
+Project data and migration history remain local.
+Normal git push and git pull operations will no longer conflict over SQLite.
+You should not need to stash the database again.
