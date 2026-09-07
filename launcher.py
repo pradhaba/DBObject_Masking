@@ -14,7 +14,8 @@ from workflow import (
 )
 from database import (
     add_custom_skill_rule, approve_change_proposal, approve_skill_version, get_skill_version_rules,
-    list_change_proposals, list_skill_versions, record_upload, save_object_selection,
+    get_language_catalog_elements, list_change_proposals, list_language_catalog_releases,
+    list_skill_versions, record_upload, save_object_selection,
     review_skill_rule, update_proposal_rule, update_skill_rule,
 )
 
@@ -37,13 +38,14 @@ class Launcher:
             ("projects", "Projects"), ("settings", "Project Settings"),
             ("files", "Source Files"), ("migration", "Migration"),
             ("routine_test", "Routine Test Plan"), ("skills", "Skill Studio"),
+            ("catalog", "Language Catalogue"),
         ):
             page = ttk.Frame(self.notebook)
             self.notebook.add(page, text=title)
             self.pages[key] = page
         self.page_canvases = {}
         self.page_containers = {}
-        for key in ("projects", "settings", "files", "routine_test", "skills"):
+        for key in ("projects", "settings", "files", "routine_test", "skills", "catalog"):
             self._prepare_scrolled_page(key)
         self.container = self.page_containers["projects"]
         self.page_canvas = self.page_canvases["projects"]
@@ -87,6 +89,8 @@ class Launcher:
                         self._empty_page("Source Files", "Select or create a project before adding source files.")
                 elif key == "skills" and not self.container.winfo_children():
                     self.root.after_idle(self.show_skill_studio)
+                elif key == "catalog" and not self.container.winfo_children():
+                    self.root.after_idle(self.show_language_catalog)
                 elif key == "migration" and not page.winfo_children():
                     ttk.Label(
                         page,
@@ -263,6 +267,7 @@ class Launcher:
         buttons = ttk.Frame(self.container); buttons.pack(fill=tk.X, pady=(18, 0))
         ttk.Button(buttons, text="Create project", command=self.show_project_form).pack(side=tk.LEFT)
         ttk.Button(buttons, text="Skill Studio", command=self.show_skill_studio).pack(side=tk.LEFT, padx=8)
+        ttk.Button(buttons, text="Language Catalogue", command=self.show_language_catalog).pack(side=tk.LEFT)
         def resume():
             selection = table.selection()
             if not selection:
@@ -295,6 +300,7 @@ class Launcher:
         self.heading("Skill Studio", "Test correction rules and approve immutable skill versions.")
         top_actions=ttk.Frame(self.container)
         top_actions.pack(fill=tk.X,pady=(0,14))
+        ttk.Button(top_actions,text="Language Catalogue",command=self.show_language_catalog).pack(side=tk.LEFT)
         versions = list_skill_versions()
         skill_header=ttk.Frame(self.container);skill_header.pack(fill=tk.X)
         ttk.Label(skill_header,text="Migration skill versions",font=("Segoe UI",11,"bold")).pack(side=tk.LEFT)
@@ -479,6 +485,111 @@ class Launcher:
         ttk.Button(bar,text="Home",command=self.show_projects).pack(side=tk.LEFT)
         ttk.Button(bar,text="Edit selected skill rules",command=edit_rules).pack(side=tk.LEFT,padx=8)
         ttk.Button(bar,text="Approve selected skill",command=approve_candidate).pack(side=tk.LEFT,padx=8)
+
+    def show_language_catalog(self):
+        """Browse and test the versioned dialect mapping catalogue."""
+        self._activate("catalog")
+        self.clear()
+        self.heading(
+            "Language Catalogue Studio",
+            "Verify datatype, keyword, function, operator, statement, and structural mappings.",
+        )
+        releases = list_language_catalog_releases()
+        pair = tk.StringVar(value="sybase_asa → postgresql")
+        kind = tk.StringVar(value="All")
+        status = tk.StringVar(value="All")
+        search = tk.StringVar()
+        release_label = tk.StringVar()
+        filters = ttk.Frame(self.container); filters.pack(fill=tk.X,pady=(0,10))
+        ttk.Label(filters,text="Dialect pair").pack(side=tk.LEFT)
+        pairs = sorted({f"{item['source_dialect']} → {item['target_dialect']}" for item in releases})
+        pair_box = ttk.Combobox(filters,textvariable=pair,values=pairs,state="readonly",width=28)
+        pair_box.pack(side=tk.LEFT,padx=(6,16))
+        ttk.Label(filters,text="Kind").pack(side=tk.LEFT)
+        kind_box = ttk.Combobox(filters,textvariable=kind,
+            values=("All","datatype","keyword","function","operator","statement","structural"),
+            state="readonly",width=13)
+        kind_box.pack(side=tk.LEFT,padx=(6,16))
+        ttk.Label(filters,text="Review").pack(side=tk.LEFT)
+        status_box = ttk.Combobox(filters,textvariable=status,
+            values=("All","approved","awaiting_approval","rejected"),state="readonly",width=18)
+        status_box.pack(side=tk.LEFT,padx=(6,16))
+        ttk.Label(filters,text="Search").pack(side=tk.LEFT)
+        search_entry = ttk.Entry(filters,textvariable=search,width=24);search_entry.pack(side=tk.LEFT,padx=6)
+        ttk.Label(self.container,textvariable=release_label,foreground="#555").pack(anchor=tk.W,pady=(0,6))
+
+        table_frame=ttk.Frame(self.container);table_frame.pack(fill=tk.BOTH,expand=True)
+        columns=("kind","disposition","source","target","mode","sections","risk","review")
+        table=ttk.Treeview(table_frame,columns=columns,show="headings",height=14)
+        specs=(("kind","Kind",90),("disposition","Disposition",125),("source","ASA pattern",230),("target","PostgreSQL mapping",190),
+               ("mode","Handling",90),("sections","Routine sections",210),("risk","Risk",65),("review","Review",110))
+        for key,label,width in specs:table.heading(key,text=label);table.column(key,width=width)
+        scroll=ttk.Scrollbar(table_frame,orient=tk.VERTICAL,command=table.yview)
+        xscroll=ttk.Scrollbar(table_frame,orient=tk.HORIZONTAL,command=table.xview)
+        table.configure(yscrollcommand=scroll.set,xscrollcommand=xscroll.set)
+        table.grid(row=0,column=0,sticky=tk.NSEW);scroll.grid(row=0,column=1,sticky=tk.NS);xscroll.grid(row=1,column=0,sticky=tk.EW)
+        table_frame.columnconfigure(0,weight=1);table_frame.rowconfigure(0,weight=1)
+
+        details=ttk.Labelframe(self.container,text="Selected mapping",padding=10);details.pack(fill=tk.X,pady=(12,0))
+        detail_text=tk.Text(details,height=7,wrap=tk.WORD);detail_text.pack(fill=tk.X)
+        test_bar=ttk.Frame(details);test_bar.pack(fill=tk.X,pady=(8,0))
+        ttk.Label(test_bar,text="Test source").pack(side=tk.LEFT)
+        test_source=tk.StringVar();ttk.Entry(test_bar,textvariable=test_source,width=70).pack(side=tk.LEFT,fill=tk.X,expand=True,padx=8)
+        test_result=tk.StringVar(value="Select a mapping, enter a source fragment, then preview it.")
+        ttk.Label(details,textvariable=test_result,foreground="#444",wraplength=1050).pack(anchor=tk.W,pady=(8,0))
+
+        elements=[]
+        visible=[]
+        def selected_element():
+            chosen=table.selection()
+            if not chosen:raise ValueError("Select a catalogue mapping.")
+            return next(item for item in visible if item["id"]==int(chosen[0]))
+        def show_detail(_event=None):
+            try:item=selected_element()
+            except ValueError:return
+            content=(f"Code: {item['element_code']}\nKind: {item['element_kind']}  Disposition: {item['disposition']}\n"
+                     f"Pattern: {item['source_pattern']}\nTarget: {item['target_template'] or '(renderer/diagnostic)'}\n"
+                     f"Handling: {item['match_mode']} {item['renderer']}\nSections: {', '.join(item['sections'])}\n"
+                     f"Risk: {item['risk_level']}  Review: {item['review_status']}\nNotes: {item['notes'] or 'None'}")
+            detail_text.delete("1.0",tk.END);detail_text.insert("1.0",content)
+        table.bind("<<TreeviewSelect>>",show_detail)
+        def refresh(*_args):
+            nonlocal elements,visible
+            source,target=(part.strip() for part in pair.get().split("→",1))
+            elements=get_language_catalog_elements(source,target,approved_only=False)
+            needle=search.get().strip().lower()
+            visible=[item for item in elements if
+                (kind.get()=="All" or item["element_kind"]==kind.get()) and
+                (status.get()=="All" or item["review_status"]==status.get()) and
+                (not needle or needle in " ".join((item["element_code"],item["source_pattern"],item["target_template"],item["notes"])).lower())]
+            table.delete(*table.get_children())
+            for item in visible:
+                table.insert("",tk.END,iid=str(item["id"]),values=(item["element_kind"],item["disposition"],item["source_pattern"],
+                    item["target_template"],item["match_mode"],", ".join(item["sections"]),item["risk_level"],item["review_status"]))
+            version=max((item["catalog_version"] for item in elements),default="-")
+            verified=sum(item["verification_status"]=="verified" for item in elements)
+            structural=sum(item["match_mode"]=="renderer" for item in elements)
+            unresolved=sum(item["disposition"] in {"unsupported","not_applicable"} or item["match_mode"]=="diagnostic" for item in elements)
+            release_label.set(
+                f"Catalogue version {version} • {len(visible)} of {len(elements)} shown • "
+                f"{verified} verified • {structural} renderer-backed • {unresolved} diagnostic/unsupported"
+            )
+            if visible:table.selection_set(str(visible[0]["id"]));show_detail()
+        def preview():
+            try:item=selected_element()
+            except ValueError as exc:messagebox.showerror("Language Catalogue",str(exc));return
+            from language_catalog import preview_language_element
+            output,count,note=preview_language_element(item,test_source.get())
+            test_result.set(f"Matches: {count} • {note}\nResult: {output}")
+        ttk.Button(test_bar,text="Preview selected mapping",command=preview).pack(side=tk.RIGHT)
+        for widget in (pair_box,kind_box,status_box):widget.bind("<<ComboboxSelected>>",refresh)
+        search.trace_add("write",refresh)
+        actions=ttk.Frame(self.container);actions.pack(fill=tk.X,pady=12)
+        ttk.Button(actions,text="Home",command=self.show_projects).pack(side=tk.LEFT)
+        ttk.Button(actions,text="Skill Studio",command=self.show_skill_studio).pack(side=tk.LEFT,padx=8)
+        if pairs:
+            if pair.get() not in pairs:pair.set(pairs[0])
+            refresh()
 
     def show_project_form(self, project=None):
         self._activate("settings")

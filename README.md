@@ -129,11 +129,33 @@ mapping for the selected project object.
 The GUI displays input DDL, output DDL, and mapping JSON in separate panes. Use
 **Copy output** or **Copy mapping** to place either result on the clipboard.
 Embedded mapping is optional and disabled by default so output DDL remains clean.
+
+### Section-aware routine migration
+
+SAP ASA procedures and functions are decomposed losslessly before migration into
+declaration, parameters, return contract, header options, local declarations,
+executable body, and exception-handler sections.  Migration results expose
+`source_sections` (locations and sizes) and `section_pipeline` (the mapping and
+rewrite skills assigned to each section).  This provides a stable boundary for
+expanding keyword and datatype coverage without applying every rewrite blindly
+to the complete routine text.
 # PostgreSQL vocabulary and metadata
 
 PostgreSQL keywords, type names, SQL special forms, and the offline built-in
 function protection list are centralized in `postgresql_vocabulary.py`.  Do
 not add private keyword or built-in lists to migration or formatting modules.
+
+### Dialect language catalogue
+
+ASA-to-PostgreSQL language mappings are maintained as immutable, reviewable
+JSON releases under `skills/catalogs/` and loaded into SQLite on startup.
+SQLite is the runtime source of truth.  Catalogue entries cover datatypes,
+keywords, functions, operators, statements, and structural constructs.  Each
+entry declares the routine sections where it is valid and whether it is a safe
+token-aware regex, a named structural renderer, or a diagnostic-only rule.
+Publish a new `catalog_version` rather than editing a release already loaded by
+an environment.  Only enabled, approved entries from the latest release are
+used during migration.
 
 Function return types and overloads are not maintained as a static list.  When
 a target connection is available, `result_metadata.py` queries `pg_catalog`

@@ -1,0 +1,51 @@
+{
+  "source_dialect": "sybase_asa",
+  "target_dialect": "postgresql",
+  "source_version": "17",
+  "target_version": "12+",
+  "catalog_version": 2,
+  "elements": [
+    {
+      "code": "asa-pg-operator-string-plus",
+      "kind": "operator",
+      "disposition": "type_dependent",
+      "source_pattern": "\\+",
+      "match_mode": "renderer",
+      "renderer": "convert_character_plus",
+      "target_template": "CONCAT(left, right)",
+      "sections": ["body"],
+      "priority": 600,
+      "risk_level": "high",
+      "verification_status": "verified",
+      "notes": "Convert only when both operands are provably character-valued. CONCAT preserves ASA null-as-empty concatenation behavior; numeric + remains unchanged."
+    },
+    {
+      "code": "asa-pg-function-list",
+      "kind": "function",
+      "disposition": "expression_rewrite",
+      "source_pattern": "\\bLIST\\s*\\(",
+      "match_mode": "renderer",
+      "renderer": "convert_list_aggregate",
+      "target_template": "COALESCE(string_agg(...), '')",
+      "sections": ["body"],
+      "priority": 610,
+      "risk_level": "high",
+      "verification_status": "verified",
+      "notes": "Preserves default comma delimiter, ignores empty strings, supports DISTINCT and aggregate ORDER BY, and returns an empty string for an empty group."
+    },
+    {
+      "code": "asa-pg-function-locate",
+      "kind": "function",
+      "disposition": "signature_rewrite",
+      "source_pattern": "\\bLOCATE\\s*\\(",
+      "match_mode": "renderer",
+      "renderer": "convert_locate",
+      "target_template": "strpos(string, substring)",
+      "sections": ["body"],
+      "priority": 620,
+      "risk_level": "medium",
+      "verification_status": "verified",
+      "notes": "Two-argument ASA LOCATE maps to PostgreSQL strpos after text casts. Additional ASA signatures require separate handling."
+    }
+  ]
+}

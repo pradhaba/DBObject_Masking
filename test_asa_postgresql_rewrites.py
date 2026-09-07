@@ -39,4 +39,24 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         self.assertEqual(diagnostics[0]['severity'], 'warning')
         self.assertIn('marked unavailable', diagnostics[0]['suggestion'])
 
+    def test_list_aggregate_maps_to_string_agg_with_asa_empty_semantics(self):
+        source = "SELECT LIST(DISTINCT name, ';' ORDER BY name) FROM people;"
+        converted, trace = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn("COALESCE(string_agg(DISTINCT NULLIF(CAST(name AS TEXT), ''),", converted)
+        self.assertIn("COALESCE(CAST(';' AS TEXT), '') ORDER BY name), '')", converted)
+        self.assertTrue(any(item['rules'][0]['rule_code']=='asa-pg-function-list' for item in trace))
+
+    def test_locate_maps_to_strpos_with_reordered_semantics(self):
+        converted, _ = convert_asa_postgresql_constructs(
+            "SELECT LOCATE(description, 'needle') FROM items;", 'function'
+        )
+        self.assertIn("strpos(CAST(description AS TEXT), CAST('needle' AS TEXT))", converted)
+
+    def test_plus_only_converts_provably_character_operands(self):
+        source = """CREATE FUNCTION f(IN first_name VARCHAR(20), IN last_name VARCHAR(20), IN n INTEGER)
+        BEGIN SELECT first_name + ' ' + last_name, n + 1; END;"""
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn("CONCAT(CONCAT(first_name, ' '), last_name)", converted)
+        self.assertIn("n + 1", converted)
+
 if __name__=='__main__': unittest.main()

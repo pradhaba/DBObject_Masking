@@ -1,0 +1,47 @@
+{
+  "source_dialect": "sybase_asa",
+  "target_dialect": "postgresql",
+  "catalog_version": 1,
+  "elements": [
+    {"code":"asa-pg-type-long-varchar","kind":"datatype","source_pattern":"\\bLONG\\s+VARCHAR\\b","target_template":"TEXT","sections":["parameters","return_contract","declarations"],"priority":100,"risk_level":"low"},
+    {"code":"asa-pg-type-long-binary","kind":"datatype","source_pattern":"\\bLONG\\s+BINARY\\b","target_template":"BYTEA","sections":["parameters","return_contract","declarations"],"priority":110,"risk_level":"medium","notes":"Verify application expectations for binary values."},
+    {"code":"asa-pg-type-varchar-star","kind":"datatype","source_pattern":"\\bVARCHAR\\s*\\(\\s*\\*\\s*\\)","target_template":"TEXT","sections":["parameters","return_contract","declarations"],"priority":120,"risk_level":"low"},
+    {"code":"asa-pg-type-char-star","kind":"datatype","source_pattern":"\\bCHAR\\s*\\(\\s*\\*\\s*\\)","target_template":"TEXT","sections":["parameters","return_contract","declarations"],"priority":130,"risk_level":"medium"},
+    {"code":"asa-pg-type-datetime","kind":"datatype","source_pattern":"\\bDATETIME\\b","target_template":"TIMESTAMP WITHOUT TIME ZONE","sections":["parameters","return_contract","declarations"],"priority":140,"risk_level":"medium","notes":"ASA DATETIME does not carry a time-zone contract."},
+    {"code":"asa-pg-type-smalldatetime","kind":"datatype","source_pattern":"\\bSMALLDATETIME\\b","target_template":"TIMESTAMP(0) WITHOUT TIME ZONE","sections":["parameters","return_contract","declarations"],"priority":141,"risk_level":"medium"},
+    {"code":"asa-pg-type-tinyint","kind":"datatype","source_pattern":"\\bTINYINT\\b","target_template":"SMALLINT","sections":["parameters","return_contract","declarations"],"priority":150,"risk_level":"low"},
+    {"code":"asa-pg-type-unsigned-smallint","kind":"datatype","source_pattern":"\\bUNSIGNED\\s+SMALLINT\\b","target_template":"INTEGER","sections":["parameters","return_contract","declarations"],"priority":151,"risk_level":"low"},
+    {"code":"asa-pg-type-unsigned-int","kind":"datatype","source_pattern":"\\bUNSIGNED\\s+(?:INT|INTEGER)\\b","target_template":"BIGINT","sections":["parameters","return_contract","declarations"],"priority":152,"risk_level":"low"},
+    {"code":"asa-pg-type-unsigned-bigint","kind":"datatype","source_pattern":"\\bUNSIGNED\\s+BIGINT\\b","target_template":"NUMERIC(20,0)","sections":["parameters","return_contract","declarations"],"priority":153,"risk_level":"medium"},
+    {"code":"asa-pg-type-money","kind":"datatype","source_pattern":"\\bMONEY\\b","target_template":"NUMERIC(19,4)","sections":["parameters","return_contract","declarations"],"priority":160,"risk_level":"medium"},
+    {"code":"asa-pg-type-smallmoney","kind":"datatype","source_pattern":"\\bSMALLMONEY\\b","target_template":"NUMERIC(10,4)","sections":["parameters","return_contract","declarations"],"priority":161,"risk_level":"medium"},
+    {"code":"asa-pg-type-bit","kind":"datatype","source_pattern":"\\bBIT\\b","target_template":"BOOLEAN","sections":["parameters","return_contract","declarations"],"priority":170,"risk_level":"medium"},
+    {"code":"asa-pg-type-uniqueidentifier","kind":"datatype","source_pattern":"\\bUNIQUEIDENTIFIER\\b","target_template":"UUID","sections":["parameters","return_contract","declarations"],"priority":180,"risk_level":"low"},
+    {"code":"asa-pg-type-double","kind":"datatype","source_pattern":"\\bDOUBLE\\b(?!\\s+PRECISION)","target_template":"DOUBLE PRECISION","sections":["parameters","return_contract","declarations"],"priority":190,"risk_level":"low"},
+
+    {"code":"asa-pg-keyword-elseif","kind":"keyword","source_pattern":"\\bELSEIF\\b","target_template":"ELSIF","sections":["body","exception_handlers"],"priority":300,"risk_level":"low"},
+    {"code":"asa-pg-keyword-current-date","kind":"keyword","source_pattern":"\\bCURRENT\\s+DATE\\b","target_template":"CURRENT_DATE","sections":["body"],"priority":310,"risk_level":"low"},
+    {"code":"asa-pg-keyword-current-time","kind":"keyword","source_pattern":"\\bCURRENT\\s+TIME\\b","target_template":"CURRENT_TIME","sections":["body"],"priority":311,"risk_level":"low"},
+    {"code":"asa-pg-keyword-current-timestamp","kind":"keyword","source_pattern":"\\bCURRENT\\s+TIMESTAMP\\b","target_template":"CURRENT_TIMESTAMP","sections":["body"],"priority":312,"risk_level":"low"},
+
+    {"code":"asa-pg-function-getdate","kind":"function","source_pattern":"\\bGETDATE\\s*\\(\\s*\\)","target_template":"CURRENT_TIMESTAMP","sections":["body"],"priority":400,"risk_level":"low"},
+    {"code":"asa-pg-function-today","kind":"function","source_pattern":"\\bTODAY\\s*\\(\\s*\\)","target_template":"CURRENT_DATE","sections":["body"],"priority":401,"risk_level":"low"},
+    {"code":"asa-pg-function-isnull","kind":"function","source_pattern":"\\bISNULL\\s*\\(","target_template":"COALESCE(","sections":["body"],"priority":410,"risk_level":"medium","notes":"Valid for ASA null-coalescing calls; predicate-style uses require review."},
+    {"code":"asa-pg-function-ifnull","kind":"function","source_pattern":"\\bIFNULL\\s*\\(","target_template":"COALESCE(","sections":["body"],"priority":411,"risk_level":"low"},
+    {"code":"asa-pg-function-lcase","kind":"function","source_pattern":"\\bLCASE\\s*\\(","target_template":"LOWER(","sections":["body"],"priority":420,"risk_level":"low"},
+    {"code":"asa-pg-function-ucase","kind":"function","source_pattern":"\\bUCASE\\s*\\(","target_template":"UPPER(","sections":["body"],"priority":421,"risk_level":"low"},
+    {"code":"asa-pg-function-datalength","kind":"function","source_pattern":"\\bDATALENGTH\\s*\\(","target_template":"OCTET_LENGTH(","sections":["body"],"priority":422,"risk_level":"medium"},
+    {"code":"asa-pg-function-remainder","kind":"function","source_pattern":"\\bREMAINDER\\s*\\(","target_template":"MOD(","sections":["body"],"priority":423,"risk_level":"medium"},
+
+    {"code":"asa-pg-statement-execute-immediate","kind":"statement","source_pattern":"\\bEXECUTE\\s+IMMEDIATE\\b","target_template":"EXECUTE","sections":["body"],"priority":500,"risk_level":"high"},
+    {"code":"asa-pg-statement-commit-work","kind":"statement","source_pattern":"\\bCOMMIT\\s+WORK\\b","target_template":"COMMIT","sections":["body"],"priority":510,"risk_level":"high"},
+    {"code":"asa-pg-statement-rollback-work","kind":"statement","source_pattern":"\\bROLLBACK\\s+WORK\\b","target_template":"ROLLBACK","sections":["body"],"priority":511,"risk_level":"high"},
+    {"code":"asa-pg-statement-raiserror","kind":"statement","source_pattern":"\\bRAISERROR\\b","match_mode":"renderer","renderer":"convert_raiserror","sections":["body","exception_handlers"],"priority":520,"risk_level":"high"},
+
+    {"code":"asa-pg-struct-top","kind":"structural","source_pattern":"\\bSELECT\\s+(?:TOP\\s+\\d+|FIRST)\\b","match_mode":"renderer","renderer":"convert_top_first","sections":["body"],"priority":700,"risk_level":"medium","notes":"Placement of LIMIT requires query-boundary parsing."},
+    {"code":"asa-pg-struct-dateadd","kind":"structural","source_pattern":"\\bDATEADD\\s*\\(","match_mode":"renderer","renderer":"convert_dateadd","sections":["body"],"priority":710,"risk_level":"medium"},
+    {"code":"asa-pg-struct-on-existing","kind":"structural","source_pattern":"\\bON\\s+EXISTING\\s+SKIP\\b","match_mode":"renderer","renderer":"convert_on_existing_skip","sections":["body"],"priority":720,"risk_level":"high"},
+    {"code":"asa-pg-struct-outer-join","kind":"operator","source_pattern":"\\*=|=\\*","match_mode":"diagnostic","sections":["body"],"priority":730,"risk_level":"high","notes":"Legacy outer-join operators require join-tree analysis."},
+    {"code":"asa-pg-struct-match","kind":"operator","source_pattern":"\\b(?:NOT\\s+)?MATCHES\\b","match_mode":"diagnostic","sections":["body"],"priority":740,"risk_level":"high","notes":"Translate only after validating ASA pattern semantics and escape behavior."}
+  ]
+}

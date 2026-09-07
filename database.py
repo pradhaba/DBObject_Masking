@@ -176,6 +176,38 @@ CREATE TABLE IF NOT EXISTS skill_regression_results (
     details TEXT NOT NULL,
     tested_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS language_catalog_releases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_dialect TEXT NOT NULL,
+    target_dialect TEXT NOT NULL,
+    catalog_version INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    loaded_at TEXT NOT NULL,
+    UNIQUE(source_dialect, target_dialect, catalog_version)
+);
+CREATE TABLE IF NOT EXISTS language_elements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_dialect TEXT NOT NULL,
+    target_dialect TEXT NOT NULL,
+    element_code TEXT NOT NULL,
+    element_kind TEXT NOT NULL CHECK(element_kind IN
+        ('datatype','keyword','function','operator','statement','structural')),
+    disposition TEXT NOT NULL DEFAULT 'rename',
+    source_pattern TEXT NOT NULL,
+    target_template TEXT NOT NULL DEFAULT '',
+    match_mode TEXT NOT NULL CHECK(match_mode IN ('regex','renderer','diagnostic')),
+    renderer TEXT NOT NULL DEFAULT '',
+    section_scopes_json TEXT NOT NULL DEFAULT '[]',
+    priority INTEGER NOT NULL DEFAULT 1000,
+    risk_level TEXT NOT NULL DEFAULT 'low',
+    review_status TEXT NOT NULL DEFAULT 'approved',
+    notes TEXT NOT NULL DEFAULT '',
+    catalog_version INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(source_dialect, target_dialect, element_code, catalog_version)
+);
+CREATE INDEX IF NOT EXISTS idx_language_elements_lookup ON language_elements
+    (source_dialect,target_dialect,catalog_version,enabled,review_status,priority);
 CREATE INDEX IF NOT EXISTS idx_objects_project ON project_objects(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project ON processing_runs(project_id, processed_at);
 CREATE INDEX IF NOT EXISTS idx_source_catalog_project ON source_catalog_snapshots(project_id, captured_at);
@@ -222,6 +254,12 @@ RULE_COLUMNS = {
     "review_notes": "TEXT NOT NULL DEFAULT ''",
     "is_custom": "INTEGER NOT NULL DEFAULT 0",
 }
+LANGUAGE_ELEMENT_COLUMNS = {
+    "disposition": "TEXT NOT NULL DEFAULT 'rename'",
+    "source_version": "TEXT NOT NULL DEFAULT ''",
+    "target_version": "TEXT NOT NULL DEFAULT ''",
+    "verification_status": "TEXT NOT NULL DEFAULT 'verified'",
+}
 
 
 def now() -> str:
@@ -236,6 +274,7 @@ def connect(path: Path = DATABASE_PATH) -> sqlite3.Connection:
     _upgrade_columns(connection, "projects", PROJECT_COLUMNS)
     _upgrade_columns(connection, "processing_runs", RUN_COLUMNS)
     _upgrade_columns(connection, "skill_rules", RULE_COLUMNS)
+    _upgrade_columns(connection, "language_elements", LANGUAGE_ELEMENT_COLUMNS)
     _seed_rules(connection)
     _seed_skill_versions(connection)
     _retire_auto_approved_versions(connection)
@@ -247,6 +286,8 @@ def connect(path: Path = DATABASE_PATH) -> sqlite3.Connection:
     _seed_schema_qualification_rule(connection)
     _seed_builtin_function_rules(connection)
     _seed_table_alias_rule(connection)
+    from language_catalog import sync_bundled_catalogs
+    sync_bundled_catalogs(connection)
     return connection
 
 
@@ -913,6 +954,28 @@ def get_active_skill_version(source_dialect: str, target_dialect: str, path: Pat
     value = dict(version)
     value["rules"] = [dict(rule) for rule in rules]
     return value
+
+
+def get_language_catalog_elements(source_dialect: str, target_dialect: str,
+                                  path: Path = DATABASE_PATH,
+                                  approved_only: bool = True) -> list[dict]:
+    """Return the latest immutable language catalogue release for a dialect pair."""
+    from language_catalog import get_language_elements
+    with closing(connect(path)) as db:
+        return get_language_elements(db, source_dialect, target_dialect, approved_only)
+
+
+def list_language_catalog_releases(path: Path = DATABASE_PATH) -> list[dict]:
+    with closing(connect(path)) as db:
+        rows = db.execute(
+            """SELECT r.*,
+            (SELECT COUNT(*) FROM language_elements e
+             WHERE e.source_dialect=r.source_dialect AND e.target_dialect=r.target_dialect
+             AND e.catalog_version=r.catalog_version) AS element_count
+            FROM language_catalog_releases r
+            ORDER BY r.source_dialect,r.target_dialect,r.catalog_version DESC"""
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def record_deployment_attempt(processing_run_id, project_id, skill_version_id, sql, status,

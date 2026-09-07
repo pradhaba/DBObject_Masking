@@ -17,6 +17,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     progress(3, 'Preparing and validating source DDL')
     text = _strip_sql_comments(text)
     _validate_sql_quoted_tokens(text)
+    source_sections = None
     if source_dialect == "sybase_asa" and not re.search(
         r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROC(?:EDURE)?|FUNCTION)\b", text, re.IGNORECASE
     ):
@@ -29,6 +30,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         raise ValueError(f"No active approved migration skill for {source_dialect} → {target_dialect}.")
     progress(12, 'Loading approved migration skill')
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
+        from routine_sections import section_pipeline, split_asa_routine
+        source_sections = split_asa_routine(text)
         from dynamic_temp_renderer import inline_simple_dynamic_sql, render_dynamic_temp_report, supports_dynamic_temp_report
         text, dynamic_inline_count = inline_simple_dynamic_sql(text)
         if supports_dynamic_temp_report(text):
@@ -45,6 +48,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                 "classification_reason": "Dynamic report returns rows; converted to a static parameterized temp-table function.",
                 "classification_rule": "dynamic-temp-result-function",
                 "analysis": analyze_asa_procedure(text),
+                "source_sections": source_sections.summary(text),
+                "section_pipeline": section_pipeline(),
                 "human_override": target_override if target_override != "auto" else None,
                 "routine_language": "plpgsql",
                 "cte_analysis": cte_analysis,
@@ -61,10 +66,12 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     else:
         dynamic_inline_count = 0
     working_text = text
+    catalog_trace = []
+    catalog_review = []
     source_scalar_return_type = _source_scalar_return_type(text)
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(22, 'Analyzing parameters and result contracts')
-        preliminary_target_type = classify_postgresql_routine(text, target_override)[0]
+        preliminary_target_type = classify_postgresql_implementation(text, target_override)["object_type"]
         from asa_postgresql_rewrites import convert_asa_postgresql_constructs
         working_text, structural_trace = convert_asa_postgresql_constructs(
             working_text, preliminary_target_type
@@ -84,6 +91,15 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         # mistake that alias for a physical source column. Inline the defining
         # expression before either masking or datatype resolution.
         working_text = _expand_same_select_alias_references(working_text)
+        from database import get_language_catalog_elements
+        from language_catalog import apply_language_catalog, catalog_coverage
+        catalog_elements = get_language_catalog_elements(
+            source_dialect, target_dialect, database_path or None
+        ) if database_path is not None else get_language_catalog_elements(
+            source_dialect, target_dialect
+        )
+        working_text, catalog_trace = apply_language_catalog(working_text, catalog_elements)
+        catalog_review = catalog_coverage(working_text, catalog_elements)
     if _is_already_masked(working_text):
         masked, mapping = working_text, _identity_mapping(working_text)
     else:
@@ -94,7 +110,10 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         migrated = _rewrite_masked_asa_global_accessors(migrated, mapping)
     analysis = analyze_asa_procedure(text) if source_dialect == "sybase_asa" else {}
-    target_type, reason, classification_rule = classify_postgresql_routine(text, target_override)
+    implementation = classify_postgresql_implementation(working_text, target_override)
+    target_type = implementation["object_type"]
+    reason = implementation["object_reason"]
+    classification_rule = implementation["object_rule"]
     inferred_result_columns = None
     diagnostics = []
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
@@ -127,10 +146,11 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     if source_dialect == "sybase_asa" and target_dialect == "postgresql":
         progress(76, 'Rendering PostgreSQL routine')
         migrated, renderer_trace, routine_language = render_postgresql_routine(
-            migrated, target_type, inferred_result_columns
+            migrated, target_type, inferred_result_columns,
+            preferred_language=implementation["language"],
         )
         trace.extend(renderer_trace)
-        trace[0:0] = structural_trace
+        trace[0:0] = structural_trace + catalog_trace
         if dynamic_inline_count:
             trace.insert(0, {
                 "line": "preprocessor", "source": "SET dynamic SQL; EXECUTE IMMEDIATE",
@@ -166,11 +186,16 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["classification_reason"] = reason
     skill["classification_rule"] = classification_rule
     skill["analysis"] = analysis
+    skill["source_sections"] = source_sections.summary(text) if source_sections else []
+    skill["section_pipeline"] = section_pipeline() if source_sections else {}
     skill["human_override"] = target_override if target_override != "auto" else None
     skill["routine_language"] = routine_language
+    skill["language_reason"] = implementation["language_reason"] if source_sections else None
+    skill["language_rule"] = implementation["language_rule"] if source_sections else None
     skill["trace"] = trace
     skill["cte_analysis"] = cte_analysis
     skill["diagnostics"] = diagnostics
+    skill["catalog_review"] = catalog_review
     skill["technical_status"] = "needs_modification" if any(
         item["severity"] == "error" and not item["resolved"] for item in diagnostics
     ) else "success"
@@ -994,7 +1019,44 @@ def classify_postgresql_routine(text: str, override="auto") -> tuple[str, str, s
     return "procedure", "No explicit return contract; preserve CALL-style behavior.", "default-procedure"
 
 
-def render_postgresql_routine(masked_text: str, target_type: str, inferred_result_columns: str | None = None):
+def classify_postgresql_implementation(text: str, override="auto") -> dict:
+    """Choose the PostgreSQL routine kind and implementation language.
+
+    LANGUAGE SQL is intentionally reserved for a single, declarative SELECT.
+    Any variables, branching, loops, dynamic SQL, error handling, transaction
+    control, or multiple statements require PL/pgSQL in this migration engine.
+    """
+    object_type, object_reason, object_rule = classify_postgresql_routine(text, override)
+    simple_select = _simple_select_body(text)
+    if object_type == "function" and simple_select is not None:
+        language = "sql"
+        language_reason = "Routine is a single declarative SELECT with no procedural constructs."
+        language_rule = "single-select-sql-language"
+    else:
+        language = "plpgsql"
+        language_reason = (
+            "PostgreSQL procedures use the procedural renderer."
+            if object_type == "procedure" else
+            "Routine contains declarations, control flow, multiple statements, or other procedural behavior."
+        )
+        language_rule = (
+            "procedure-plpgsql-language" if object_type == "procedure"
+            else "procedural-function-plpgsql-language"
+        )
+    return {
+        "object_type": object_type,
+        "object_reason": object_reason,
+        "object_rule": object_rule,
+        "language": language,
+        "language_reason": language_reason,
+        "language_rule": language_rule,
+        "signals": analyze_asa_procedure(text),
+    }
+
+
+def render_postgresql_routine(masked_text: str, target_type: str,
+                              inferred_result_columns: str | None = None,
+                              preferred_language: str | None = None):
     """Render a masked ASA procedure or function as a PostgreSQL routine."""
     match = re.search(
         r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?P<kind>PROC(?:EDURE)?|FUNCTION)\s+"
@@ -1026,7 +1088,7 @@ def render_postgresql_routine(masked_text: str, target_type: str, inferred_resul
         else:
             returns = "RETURNS SETOF RECORD"
         simple_select = None if normalized_scalar_type else _simple_select_body(body)
-        if simple_select is not None:
+        if simple_select is not None and preferred_language in {None, "sql"}:
             rendered = f"CREATE OR REPLACE FUNCTION {name}{params}\n{returns}\nLANGUAGE sql\nAS $$\n{simple_select.rstrip(';')};\n$$;"
             renderer = "postgresql-sql-function-renderer"
             routine_language = "sql"
