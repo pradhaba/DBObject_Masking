@@ -1,6 +1,6 @@
 import unittest
 from asa_postgresql_rewrites import convert_asa_postgresql_constructs
-from migration_engine import _unqualified_masked_column_diagnostics
+from migration_engine import _apply_table_alias_policy, _unqualified_masked_column_diagnostics
 
 class AsaPostgresqlRewriteTests(unittest.TestCase):
     def test_nested_top_and_first_move_to_query_end(self):
@@ -58,5 +58,43 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         converted, _ = convert_asa_postgresql_constructs(source, 'function')
         self.assertIn("CONCAT(CONCAT(first_name, ' '), last_name)", converted)
         self.assertIn("n + 1", converted)
+
+    def test_nested_join_conversion_preserves_outer_where_predicates(self):
+        source = '''CREATE PROCEDURE dba.PROC_1(IN PARAM_1 INTEGER)
+BEGIN
+SELECT TBL_1.COL_1
+FROM dba.TBL_1, dba.TBL_2, dba.TBL_3
+WHERE TBL_1.COL_2 = PARAM_1
+AND TBL_2.COL_3 = TBL_1.COL_3
+AND EXISTS (
+  SELECT * FROM dba.TBL_4, dba.TBL_5 "inner_user"
+  WHERE "inner_user".COL_4 = TBL_4.COL_4
+  AND TBL_4.COL_5 = TBL_1.COL_5
+)
+AND TBL_3.COL_6 IS NULL
+END;'''
+        mapping = {'tables': {
+            'users': 'TBL_1', 'staff': 'TBL_2', 'parameters': 'TBL_3',
+            'rights': 'TBL_4', 'members': 'TBL_5',
+        }}
+        converted, _ = _apply_table_alias_policy(source, '{"alias_length":3}', mapping)
+        self.assertIn('use.COL_2 = PARAM_1', converted)
+        self.assertIn('par.COL_6 IS NULL', converted)
+        self.assertIn('EXISTS (', converted)
+        self.assertIn('JOIN dba.TBL_5 "inner_user" ON "inner_user".COL_4 = rig.COL_4', converted)
+        self.assertNotRegex(converted, r'(?is)\bEND\b\s*\bWHERE\b')
+
+    def test_masked_table_token_after_relation_is_restored_as_missing_comma(self):
+        source = '''SELECT * FROM dba.TBL_1
+TBL_2,
+TBL_3 "users2"
+WHERE TBL_1.COL_1 = TBL_3.COL_1 AND TBL_2.COL_2 = TBL_3.COL_2;'''
+        mapping = {'tables': {
+            'users_rights': 'TBL_1', 'users_membership': 'TBL_2', 'users': 'TBL_3'
+        }}
+        converted, _ = _apply_table_alias_policy(source, '{"alias_length":3}', mapping)
+        self.assertIn('FROM dba.TBL_1 AS usr', converted)
+        self.assertIn('CROSS JOIN TBL_2 AS usm', converted)
+        self.assertIn('JOIN TBL_3 "users2" ON', converted)
 
 if __name__=='__main__': unittest.main()

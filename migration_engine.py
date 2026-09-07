@@ -556,10 +556,28 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
     used: set[str] = set()
     aliases: dict[str, str] = {}
     changes = 0
+    table_tokens = {
+        str(token).strip('"').lower()
+        for token in mapping.get("tables", {}).values()
+    }
+    missing_separator = re.compile(
+        r'(?P<first>(?:(?:"?[A-Za-z_]\w*"?)\.)?"?TBL_\d+"?)'
+        r'(?P<space>\s+)(?P<second>"?TBL_\d+"?)(?=\s*,)',
+        re.IGNORECASE,
+    )
+
+    def restore_relation_separator(match):
+        nonlocal changes
+        if match.group('second').strip('"').lower() not in table_tokens:
+            return match.group(0)
+        changes += 1
+        return f"{match.group('first')},{match.group('space')}{match.group('second')}"
+
+    sql = missing_separator.sub(restore_relation_separator, sql)
     reserved = r"(?:ON|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|GROUP|ORDER|HAVING|UNION|LIMIT|OFFSET|FETCH|RETURNING|SET|END|ELSE|ELSIF|EXCEPTION)"
     relation = re.compile(
         rf"(?P<prefix>(?:\b(?:FROM|JOIN)\s+|,\s*))(?P<relation>(?:(?:\"?[A-Za-z_]\w*\"?)\.)?(?P<table>\"?TBL_\d+\"?))(?!\s*[.(])"
-        rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)[A-Za-z_]\w*))?",
+        rf"(?P<alias_part>\s+(?:AS\s+)?(?P<alias>(?!{reserved}\b)(?:\"[A-Za-z_]\w*\"|[A-Za-z_]\w*)))?",
         re.IGNORECASE,
     )
 
@@ -610,6 +628,7 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
         token = match.group("table").strip('"')
         token_key = token.lower()
         existing = match.group("alias")
+        existing_name = existing.strip('"') if existing else None
         if token_key in aliases:
             if existing:
                 return f"{prefix}{match.group('relation')}{match.group('alias_part')}"
@@ -620,7 +639,7 @@ def _apply_table_alias_policy(sql: str, policy_json: str, mapping) -> tuple[str,
             changes += 1
             return f"{prefix}{match.group('relation')} AS {aliases[token_key]}"
         if existing:
-            aliases[token_key] = unique_alias(existing, reverse_tables.get(token_key, token))
+            aliases[token_key] = unique_alias(existing_name, reverse_tables.get(token_key, token))
             return f"{prefix}{match.group('relation')}{match.group('alias_part')}"
         original = reverse_tables.get(token_key, token)
         configured = overrides.get(original.lower())
@@ -782,7 +801,9 @@ def _split_conjuncts(text: str) -> list[str]:
 def _has_outer_alias_reference(predicate: str, alias: str) -> bool:
     """Find an alias reference without counting references in scalar subqueries."""
     value = _strip_enclosing_parentheses(predicate)
-    target = re.compile(rf'(?<!\w){re.escape(alias)}\s*\.', re.IGNORECASE)
+    target = re.compile(
+        rf'(?<!\w)"?{re.escape(alias)}"?\s*\.', re.IGNORECASE
+    )
     visible = []
     quote = None
     index = 0
@@ -797,7 +818,7 @@ def _has_outer_alias_reference(predicate: str, alias: str) -> bool:
             visible.append(' ')
             index += 1
             continue
-        if char in ("'", '"'):
+        if char == "'":
             quote = char
             visible.append(' ')
         elif char == '(' and re.match(r'\s*SELECT\b', value[index + 1:], re.IGNORECASE):
@@ -890,13 +911,16 @@ def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
             return None
         conditions = sql[where_end:condition_end]
         predicates = _split_conjuncts(conditions)
-        alias_pattern = re.compile(r'(?:\bAS\s+|\s+)([A-Za-z_]\w*)\s*$', re.IGNORECASE)
+        alias_pattern = re.compile(
+            r'(?:\bAS\s+|\s+)("[A-Za-z_]\w*"|[A-Za-z_]\w*)\s*$',
+            re.IGNORECASE,
+        )
         relation_aliases = []
         for relation_text in relations:
             alias_match = alias_pattern.search(relation_text)
             if not alias_match:
                 return None
-            relation_aliases.append(alias_match.group(1))
+            relation_aliases.append(alias_match.group(1).strip('"'))
 
         remaining = list(predicates)
         joined = [relation_aliases[0]]
@@ -920,43 +944,47 @@ def _convert_comma_tables_to_joins(sql: str) -> tuple[str, int]:
             where_sql = f"\nWHERE\n{'\nAND '.join(remaining)}"
         return f"FROM {chr(10).join(join_lines)}{where_sql}"
 
-    replacements = []
-    for from_start, from_end in from_positions():
-        where_start, where_end = find_boundary(
-            from_end,
-            [r'\bWHERE\b', r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bUNION\b'],
-            semicolon=True,
-        )
-        if not re.match(r'\bWHERE\b', sql[where_start:where_end], re.IGNORECASE):
-            continue
-        condition_end, _ = find_boundary(
-            where_end,
-            [r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bHAVING\b', r'\bUNION\b',
-             r'\bRETURNING\b', r'(?m)^[ \t]*ELSE\b', r'(?m)^[ \t]*END\s+IF\b'],
-            semicolon=True,
-        )
-        replacement = convert_block(from_start, from_end, where_start, where_end, condition_end)
-        if replacement is not None:
-            if re.match(r'[ \t]*ELSE\b', sql[condition_end:], re.IGNORECASE):
-                replacement = replacement.rstrip() + ';\n'
-            elif re.match(r'[ \t]*END\s+IF\b', sql[condition_end:], re.IGNORECASE):
-                replacement += '\n'
-            elif re.match(r'\s*(?:GROUP\s+BY|ORDER\s+BY|HAVING|UNION|RETURNING)\b', sql[condition_end:], re.IGNORECASE):
-                replacement = replacement.rstrip() + '\n'
-            replacements.append((from_start, condition_end, replacement))
-
-    # Nested candidates can overlap an outer SELECT. Only apply non-overlapping
-    # blocks from right to left so offsets remain stable.
-    converted = sql
-    applied_start = len(sql) + 1
     count = 0
-    for start, end, replacement in sorted(replacements, reverse=True):
-        if end > applied_start:
-            continue
-        converted = converted[:start] + replacement + converted[end:]
-        applied_start = start
-        count += 1
-    return converted, count
+    while True:
+        changed = False
+        # Process one innermost query and then rediscover all offsets. This is
+        # required because nested replacements change the size of outer scopes.
+        for from_start, from_end in reversed(from_positions()):
+            where_start, where_end = find_boundary(
+                from_end,
+                [r'\bWHERE\b', r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bUNION\b'],
+                semicolon=True,
+            )
+            if not re.match(r'\bWHERE\b', sql[where_start:where_end], re.IGNORECASE):
+                continue
+            condition_end, _ = find_boundary(
+                where_end,
+                [r'\bGROUP\s+BY\b', r'\bORDER\s+BY\b', r'\bHAVING\b', r'\bUNION\b',
+                 r'\bRETURNING\b', r'(?m)^[ \t]*ELSE\b', r'(?m)^[ \t]*END\s+IF\b',
+                 r'(?m)^[ \t]*END\s*;?[ \t]*$'],
+                semicolon=True,
+            )
+            replacement = convert_block(
+                from_start, from_end, where_start, where_end, condition_end
+            )
+            if replacement is None:
+                continue
+            boundary = sql[condition_end:]
+            if re.match(r'[ \t]*ELSE\b', boundary, re.IGNORECASE):
+                replacement = replacement.rstrip() + ';\n'
+            elif re.match(r'[ \t]*END(?:\s+IF)?\b', boundary, re.IGNORECASE):
+                replacement = replacement.rstrip() + '\n'
+            elif re.match(
+                r'\s*(?:GROUP\s+BY|ORDER\s+BY|HAVING|UNION|RETURNING)\b',
+                boundary, re.IGNORECASE,
+            ):
+                replacement = replacement.rstrip() + '\n'
+            sql = sql[:from_start] + replacement + sql[condition_end:]
+            count += 1
+            changed = True
+            break
+        if not changed:
+            return sql, count
 
 
 def _qualify_schema_references(line: str, schema: str) -> tuple[str, int]:
