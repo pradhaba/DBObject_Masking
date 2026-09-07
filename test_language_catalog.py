@@ -1,9 +1,16 @@
+import hashlib
+import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
-from database import connect, get_language_catalog_elements
-from language_catalog import apply_language_catalog, catalog_coverage
+from database import _migrate_legacy_database, connect, get_language_catalog_elements
+from language_catalog import (
+    apply_language_catalog, canonical_catalog_hash, catalog_coverage,
+)
 
 
 class LanguageCatalogTests(unittest.TestCase):
@@ -52,6 +59,65 @@ class LanguageCatalogTests(unittest.TestCase):
         review = catalog_coverage(converted, elements)
         self.assertEqual(review[0]["code"], "asa-pg-struct-outer-join")
         self.assertEqual(review[0]["handling"], "diagnostic")
+
+    def test_canonical_hash_ignores_formatting_bom_and_line_endings(self):
+        payload = {"target": "postgresql", "elements": [{"code": "x"}]}
+        lf = json.dumps(payload, indent=2).encode("utf-8") + b"\n"
+        crlf = b"\xef\xbb\xbf" + lf.replace(b"\n", b"\r\n")
+        self.assertEqual(
+            canonical_catalog_hash(json.loads(lf.decode("utf-8"))),
+            canonical_catalog_hash(json.loads(crlf.decode("utf-8-sig"))),
+        )
+
+    def test_legacy_line_ending_hash_is_upgraded_automatically(self):
+        with closing(connect(self.database_path)) as db, db:
+            catalog = Path(__file__).parent / "skills" / "catalogs" / "sybase_asa_to_postgresql.v1.json"
+            lf = catalog.read_bytes().replace(b"\r\n", b"\n")
+            legacy_hash = hashlib.sha256(lf).hexdigest()
+            db.execute("UPDATE language_catalog_releases SET content_hash=? WHERE catalog_version=1", (legacy_hash,))
+            db.commit()
+        with closing(connect(self.database_path)) as db:
+            stored = db.execute("SELECT content_hash FROM language_catalog_releases WHERE catalog_version=1").fetchone()[0]
+            payload = json.loads(catalog.read_text(encoding="utf-8-sig"))
+            self.assertEqual(stored, canonical_catalog_hash(payload))
+
+    def test_unknown_legacy_hash_is_repaired_when_stored_rows_match(self):
+        with closing(connect(self.database_path)) as db, db:
+            db.execute(
+                "UPDATE language_catalog_releases SET content_hash='legacy-unknown' WHERE catalog_version=1"
+            )
+        with closing(connect(self.database_path)) as db:
+            stored = db.execute(
+                "SELECT content_hash FROM language_catalog_releases WHERE catalog_version=1"
+            ).fetchone()[0]
+        catalog = Path(__file__).parent / "skills" / "catalogs" / "sybase_asa_to_postgresql.v1.json"
+        payload = json.loads(catalog.read_text(encoding="utf-8-sig"))
+        self.assertEqual(stored, canonical_catalog_hash(payload))
+
+    def test_real_same_version_change_is_rejected(self):
+        get_language_catalog_elements("sybase_asa", "postgresql", self.database_path)
+        catalog_dir = Path(self.temp.name) / "changed_catalog"
+        catalog_dir.mkdir()
+        source = Path(__file__).parent / "skills" / "catalogs" / "sybase_asa_to_postgresql.v1.json"
+        payload = json.loads(source.read_text(encoding="utf-8-sig"))
+        payload["elements"][0]["target_template"] = "CHANGED_WITHOUT_VERSION"
+        (catalog_dir / source.name).write_text(json.dumps(payload), encoding="utf-8")
+        with patch("language_catalog.CATALOG_DIR", catalog_dir):
+            with self.assertRaisesRegex(ValueError, "immutable SQLite release"):
+                connect(self.database_path)
+
+    def test_legacy_database_is_copied_backed_up_and_migrated_once(self):
+        legacy = Path(self.temp.name) / "legacy.sqlite3"
+        target = Path(self.temp.name) / "local" / "ddl_masker.sqlite3"
+        with closing(sqlite3.connect(legacy)) as db, db:
+            db.execute("CREATE TABLE marker(value TEXT)")
+            db.execute("INSERT INTO marker VALUES ('preserved')")
+        self.assertTrue(_migrate_legacy_database(target, legacy))
+        self.assertFalse(_migrate_legacy_database(target, legacy))
+        backup = target.with_name("ddl_masker.legacy-backup.sqlite3")
+        self.assertTrue(backup.exists())
+        with closing(sqlite3.connect(target)) as db:
+            self.assertEqual(db.execute("SELECT value FROM marker").fetchone()[0], "preserved")
 
 
 if __name__ == "__main__":

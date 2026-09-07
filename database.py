@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import sqlite3
 from contextlib import closing
 from dataclasses import asdict
@@ -11,8 +13,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DATABASE_DIR = Path(__file__).resolve().parent / "data"
-DATABASE_PATH = DATABASE_DIR / "ddl_masker.sqlite3"
+LEGACY_DATABASE_PATH = Path(__file__).resolve().parent / "data" / "ddl_masker.sqlite3"
+
+
+def _default_database_path() -> Path:
+    override = os.environ.get("DBOBJECT_MASKING_DATABASE_PATH")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "DBObject_Masking" / "ddl_masker.sqlite3"
+    return Path.home() / ".dbobject_masking" / "ddl_masker.sqlite3"
+
+
+DATABASE_PATH = _default_database_path()
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -267,28 +281,55 @@ def now() -> str:
 
 
 def connect(path: Path = DATABASE_PATH) -> sqlite3.Connection:
+    path = Path(path)
+    if path == DATABASE_PATH:
+        _migrate_legacy_database(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.executescript(SCHEMA)
-    _upgrade_columns(connection, "projects", PROJECT_COLUMNS)
-    _upgrade_columns(connection, "processing_runs", RUN_COLUMNS)
-    _upgrade_columns(connection, "skill_rules", RULE_COLUMNS)
-    _upgrade_columns(connection, "language_elements", LANGUAGE_ELEMENT_COLUMNS)
-    _seed_rules(connection)
-    _seed_skill_versions(connection)
-    _retire_auto_approved_versions(connection)
-    _seed_asa_procedure_candidate(connection)
-    _seed_additional_asa_rules(connection)
-    _inherit_unchanged_rule_reviews(connection)
-    _seed_postgresql_type_revision(connection)
-    _seed_global_variable_rule(connection)
-    _seed_schema_qualification_rule(connection)
-    _seed_builtin_function_rules(connection)
-    _seed_table_alias_rule(connection)
-    from language_catalog import sync_bundled_catalogs
-    sync_bundled_catalogs(connection)
-    return connection
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.executescript(SCHEMA)
+        _upgrade_columns(connection, "projects", PROJECT_COLUMNS)
+        _upgrade_columns(connection, "processing_runs", RUN_COLUMNS)
+        _upgrade_columns(connection, "skill_rules", RULE_COLUMNS)
+        _upgrade_columns(connection, "language_elements", LANGUAGE_ELEMENT_COLUMNS)
+        _seed_rules(connection)
+        _seed_skill_versions(connection)
+        _retire_auto_approved_versions(connection)
+        _seed_asa_procedure_candidate(connection)
+        _seed_additional_asa_rules(connection)
+        _inherit_unchanged_rule_reviews(connection)
+        _seed_postgresql_type_revision(connection)
+        _seed_global_variable_rule(connection)
+        _seed_schema_qualification_rule(connection)
+        _seed_builtin_function_rules(connection)
+        _seed_table_alias_rule(connection)
+        from language_catalog import sync_bundled_catalogs
+        sync_bundled_catalogs(connection)
+        return connection
+    except Exception:
+        connection.close()
+        raise
+
+
+def _migrate_legacy_database(path: Path, legacy_path: Path = LEGACY_DATABASE_PATH) -> bool:
+    """Copy the repository-era database to local application storage once."""
+    path = Path(path)
+    legacy_path = Path(legacy_path)
+    try:
+        if path.resolve() == legacy_path.resolve() or path.exists() or not legacy_path.exists():
+            return False
+    except OSError:
+        if path == legacy_path or path.exists() or not legacy_path.exists():
+            return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup = path.with_name(f"{path.stem}.legacy-backup{path.suffix}")
+    if not backup.exists():
+        shutil.copy2(legacy_path, backup)
+    temporary = path.with_name(f"{path.name}.migrating")
+    shutil.copy2(legacy_path, temporary)
+    temporary.replace(path)
+    return True
 
 
 def _upgrade_columns(connection, table: str, definitions: dict[str, str]) -> None:

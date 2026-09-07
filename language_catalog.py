@@ -29,12 +29,12 @@ def sync_bundled_catalogs(connection) -> None:
         return
     for path in sorted(CATALOG_DIR.glob("*.json")):
         raw = path.read_bytes()
-        payload = json.loads(raw.decode("utf-8"))
+        payload = json.loads(raw.decode("utf-8-sig"))
         _validate_catalog(payload, path)
         source = payload["source_dialect"]
         target = payload["target_dialect"]
         version = int(payload["catalog_version"])
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = canonical_catalog_hash(payload)
         existing = connection.execute(
             """SELECT content_hash FROM language_catalog_releases
             WHERE source_dialect=? AND target_dialect=? AND catalog_version=?""",
@@ -42,10 +42,22 @@ def sync_bundled_catalogs(connection) -> None:
         ).fetchone()
         if existing:
             if existing["content_hash"] != digest:
-                raise ValueError(
-                    f"Catalogue {source} -> {target} v{version} changed after loading; "
-                    "publish a new catalog_version instead."
-                )
+                legacy_hashes = _legacy_byte_hashes(raw)
+                if (existing["content_hash"] in legacy_hashes
+                        or _stored_release_matches(connection, payload)):
+                    connection.execute(
+                        """UPDATE language_catalog_releases SET content_hash=?
+                        WHERE source_dialect=? AND target_dialect=? AND catalog_version=?""",
+                        (digest, source, target, version),
+                    )
+                    connection.commit()
+                else:
+                    raise ValueError(
+                        f"Catalogue {source} -> {target} v{version} differs from its immutable "
+                        f"SQLite release. Expected canonical hash {digest}; stored hash "
+                        f"{existing['content_hash']}. Restore the published JSON or increment "
+                        "catalog_version for a genuine mapping change."
+                    )
             continue
         for entry in payload["elements"]:
             connection.execute(
@@ -71,6 +83,59 @@ def sync_bundled_catalogs(connection) -> None:
             VALUES (?,?,?,?,datetime('now'))""", (source, target, version, digest),
         )
         connection.commit()
+
+
+def canonical_catalog_hash(payload: dict) -> str:
+    """Hash JSON meaning rather than formatting, encoding BOM, or line endings."""
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _legacy_byte_hashes(raw: bytes) -> set[str]:
+    """Hashes produced by the pre-canonical implementation on common checkouts."""
+    without_bom = raw[3:] if raw.startswith(b"\xef\xbb\xbf") else raw
+    lf = without_bom.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    crlf = lf.replace(b"\n", b"\r\n")
+    variants = {raw, without_bom, lf, crlf, b"\xef\xbb\xbf" + lf, b"\xef\xbb\xbf" + crlf}
+    return {hashlib.sha256(value).hexdigest() for value in variants}
+
+
+def _stored_release_matches(connection, payload: dict) -> bool:
+    """Semantically compare a legacy SQLite release with its bundled JSON."""
+    rows = connection.execute(
+        """SELECT * FROM language_elements WHERE source_dialect=? AND target_dialect=?
+        AND catalog_version=? ORDER BY element_code""",
+        (payload["source_dialect"], payload["target_dialect"], int(payload["catalog_version"])),
+    ).fetchall()
+    stored = {_normalized_stored_element(dict(row)) for row in rows}
+    expected = {_normalized_payload_element(payload, entry) for entry in payload["elements"]}
+    return bool(stored) and stored == expected
+
+
+def _normalized_payload_element(payload, entry):
+    return (
+        entry["code"], entry["kind"], entry.get("disposition", "rename"),
+        entry["source_pattern"], entry.get("target_template", ""),
+        entry.get("match_mode", "regex"), entry.get("renderer", ""),
+        tuple(entry.get("sections", [])), int(entry.get("priority", 1000)),
+        entry.get("risk_level", "low"), entry.get("review_status", "approved"),
+        entry.get("notes", ""), int(bool(entry.get("enabled", True))),
+        payload.get("source_version", ""), payload.get("target_version", ""),
+        entry.get("verification_status", "verified"),
+    )
+
+
+def _normalized_stored_element(entry):
+    return (
+        entry["element_code"], entry["element_kind"], entry.get("disposition", "rename"),
+        entry["source_pattern"], entry["target_template"], entry["match_mode"],
+        entry["renderer"], tuple(json.loads(entry["section_scopes_json"])),
+        int(entry["priority"]), entry["risk_level"], entry["review_status"],
+        entry["notes"], int(entry["enabled"]), entry.get("source_version", ""),
+        entry.get("target_version", ""), entry.get("verification_status", "verified"),
+    )
 
 
 def get_language_elements(connection, source_dialect: str, target_dialect: str,

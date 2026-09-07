@@ -107,7 +107,8 @@ rule. Approval creates and activates a new skill version and supersedes—but ne
 deletes or modifies—the previous version.
 
 Application data is stored in the embedded SQLite database
-`data/ddl_masker.sqlite3`. It is initialized automatically and records projects,
+the per-user application-data database (`%LOCALAPPDATA%/DBObject_Masking/ddl_masker.sqlite3`
+on Windows). It is initialized automatically and records projects,
 connection profiles (never passwords), uploads, object selections, and processing
 history including source/target dialects, input/output DDL, and mappings. When
 unmasking, the workspace automatically reuses the latest mapping saved for the
@@ -156,6 +157,13 @@ token-aware regex, a named structural renderer, or a diagnostic-only rule.
 Publish a new `catalog_version` rather than editing a release already loaded by
 an environment.  Only enabled, approved entries from the latest release are
 used during migration.
+
+Older installations that stored SQLite in `data/ddl_masker.sqlite3` are copied
+to the per-user location on first launch, with a `legacy-backup` copy retained.
+Catalogue release hashes use canonical JSON content, so Git line-ending or
+formatting differences do not invalidate an otherwise identical release. Set
+`DBOBJECT_MASKING_DATABASE_PATH` to use an explicit database path for testing
+or managed deployments.
 
 Function return types and overloads are not maintained as a static list.  When
 a target connection is available, `result_metadata.py` queries `pg_catalog`
