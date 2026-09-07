@@ -53,3 +53,25 @@ Get-Process python,pythonw -ErrorAction SilentlyContinue | Stop-Process
 .\.venv\Scripts\python.exe gui.py
 
 git stash push data/ddl_masker.sqlite3
+
+==================================================================
+This conflict is expected because SQLite is a binary file and Git cannot merge the upstream copy with your stashed local database.
+Keep the stashed version because it contains the remote computer’s local projects and history.
+Run on the remote computer from the repository root:
+git checkout --theirs -- data/ddl_masker.sqlite3
+
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\DBObject_Masking"
+Copy-Item "data\ddl_masker.sqlite3" "$env:LOCALAPPDATA\DBObject_Masking\ddl_masker.pre-migration-backup.sqlite3"
+
+git add data/ddl_masker.sqlite3
+git status
+Here, --theirs means the stashed database during a stash pop conflict.
+Then start the application:
+python gui.py
+The application should migrate the database to:
+%LOCALAPPDATA%\DBObject_Masking\ddl_masker.sqlite3
+Verify that your projects appear. After confirming everything works, inspect the retained stash:
+git stash list
+Because stash pop conflicted, Git normally keeps the stash. Once the application and project data are verified, remove it with:
+git stash drop 'stash@{0}'
+Be sure to use the exact filename shown by git status. The repository filename is normally data/ddl_masker.sqlite3—with one l in sqlite3.
