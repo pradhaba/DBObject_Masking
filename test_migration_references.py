@@ -1,6 +1,10 @@
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
+
+import sqlite3
 
 import yaml
 
@@ -81,6 +85,30 @@ $$;'''
         self.assertIn('CREATE_PROCEDURE', features)
         self.assertIn('SELECT', features)
         self.assertNotIn('ITEMS', features)
+
+    def test_brain_export_does_not_run_inside_reference_write_transaction(self):
+        run_id = self._run()
+        corrected = self.generated.replace('SELECT OLD_VALUE', 'SELECT NEW_VALUE')
+        lesson_path = self.brain_dir / 'lesson-test.yaml'
+
+        def export_while_touching_same_database(*_args, **_kwargs):
+            # Catalogue-backed masking may initialize/update the same runtime DB.
+            # This write reproduces the lock seen when export ran inside the
+            # migration-reference transaction.
+            with closing(sqlite3.connect(self.path, timeout=0.05)) as second_connection, second_connection:
+                second_connection.execute(
+                    "UPDATE processing_runs SET review_notes=review_notes WHERE id=?",
+                    (run_id,),
+                )
+            return lesson_path
+
+        with patch('migration_brain.export_masked_lesson', export_while_touching_same_database):
+            reference_id = create_migration_reference(
+                run_id, corrected, 'reviewer', path=self.path, brain_dir=self.brain_dir
+            )
+
+        self.assertGreater(reference_id, 0)
+        self.assertEqual(list_migration_references(self.path)[0]['knowledge_path'], str(lesson_path))
 
 
 if __name__ == '__main__':

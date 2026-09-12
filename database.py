@@ -1277,25 +1277,44 @@ def create_migration_reference(run_id: int, corrected_ddl: str, reviewer: str,
     if not corrected_ddl.strip():
         raise ValueError("Corrected PostgreSQL DDL is required.")
     from migration_references import extract_reference_corrections, source_features
-    with closing(connect(path)) as db, db:
-        run = db.execute("SELECT * FROM processing_runs WHERE id=?", (run_id,)).fetchone()
-        if run is None or run["operation"] != "migrate":
+
+    # Exporting masks the examples and therefore reads catalogue data through a
+    # separate connection.  Do that before starting this write transaction;
+    # otherwise the default runtime database deadlocks against its own writer.
+    with closing(connect(path)) as db:
+        row = db.execute("SELECT * FROM processing_runs WHERE id=?", (run_id,)).fetchone()
+        if row is None or row["operation"] != "migrate":
             raise ValueError("A completed Test Migrate run is required.")
-        existing = db.execute(
+        run = dict(row)
+        existing_row = db.execute(
             "SELECT * FROM migration_references WHERE processing_run_id=? AND corrected_ddl=?",
             (run_id, corrected_ddl.strip()),
         ).fetchone()
-        if existing:
-            corrections = extract_reference_corrections(run["output_ddl"], corrected_ddl.strip())
-            from migration_brain import export_masked_lesson
-            knowledge_path = export_masked_lesson(
-                dict(run), corrected_ddl.strip(), corrections, brain_dir
-            )
+        existing_id = existing_row["id"] if existing_row else None
+
+    corrections = extract_reference_corrections(run["output_ddl"], corrected_ddl.strip())
+    from migration_brain import export_masked_lesson
+    knowledge_path = export_masked_lesson(
+        run, corrected_ddl.strip(), corrections, brain_dir
+    )
+
+    with closing(connect(path)) as db, db:
+        if existing_id is not None:
+            # Recheck by content in case another process saved it during export.
+            existing = db.execute(
+                "SELECT id FROM migration_references WHERE processing_run_id=? AND corrected_ddl=?",
+                (run_id, corrected_ddl.strip()),
+            ).fetchone()
+            if existing is None:
+                existing_id = None
+            else:
+                existing_id = existing["id"]
+        if existing_id is not None:
             db.execute(
                 "UPDATE migration_references SET knowledge_path=? WHERE id=?",
-                (str(knowledge_path), existing["id"]),
+                (str(knowledge_path), existing_id),
             )
-            return existing["id"]
+            return existing_id
         cursor = db.execute(
             """INSERT INTO migration_references
             (processing_run_id,source_dialect,target_dialect,source_ddl,generated_ddl,
@@ -1307,17 +1326,12 @@ def create_migration_reference(run_id: int, corrected_ddl: str, reviewer: str,
              notes.strip(), now()),
         )
         reference_id = cursor.lastrowid
-        corrections = extract_reference_corrections(run["output_ddl"], corrected_ddl.strip())
         db.executemany(
             """INSERT INTO migration_reference_corrections
             (reference_id,before_text,after_text,occurrence_order,auto_apply)
             VALUES (?,?,?,?,1)""",
             [(reference_id, before, after, order)
              for order, (before, after) in enumerate(corrections, start=1)],
-        )
-        from migration_brain import export_masked_lesson
-        knowledge_path = export_masked_lesson(
-            dict(run), corrected_ddl.strip(), corrections, brain_dir
         )
         db.execute(
             "UPDATE migration_references SET knowledge_path=? WHERE id=?",
