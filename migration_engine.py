@@ -14,6 +14,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                  progress_callback=None, source_catalog=None, source_available=True):
     """Mask identifiers, apply the selected DB skill, then restore target names."""
     progress = progress_callback or (lambda _percent, _status: None)
+    reference_matches = []
+    brain_lessons = []
     progress(3, 'Preparing and validating source DDL')
     text = _strip_sql_comments(text)
     _validate_sql_quoted_tokens(text)
@@ -40,6 +42,14 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
             from postgres_formatter import format_postgresql_routine
             rendered = _cast_returns_table_text_outputs(render_dynamic_temp_report(text))
             rendered = format_postgresql_routine(rendered, formatter_indent)
+            from database import DATABASE_PATH
+            from migration_references import apply_relevant_references
+            rendered, reference_trace, reference_matches = apply_relevant_references(
+                text, rendered, source_dialect, target_dialect,
+                database_path or DATABASE_PATH,
+            )
+            from migration_brain import relevant_brain_lessons
+            brain_lessons = relevant_brain_lessons(text, source_dialect, target_dialect)
             from cte_analyzer import analyze_cte_suitability, cte_trace
             cte_analysis = analyze_cte_suitability(rendered)
             skill = dict(skill)
@@ -55,11 +65,13 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
                 "cte_analysis": cte_analysis,
                 "diagnostics": [],
                 "technical_status": "success",
+                "references": reference_matches,
+                "brain_lessons": brain_lessons,
                 "trace": [{
                     "line": "renderer", "source": "EXECUTE IMMEDIATE with tmp_records",
                     "output": "Static parameterized INSERT branches with a PostgreSQL temporary table",
                     "rules": [{"rule_id": "dynamic-temp-static-renderer", "rule_code": "dynamic-temp-static-renderer", "priority": 1950, "matches": 1}],
-                }] + cte_trace(cte_analysis),
+                }] + reference_trace + cte_trace(cte_analysis),
             })
             progress(100, 'Migration preview complete')
             return rendered, mapping, skill
@@ -173,6 +185,17 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         restored, implemented_ctes = apply_readability_ctes(restored)
         from postgres_formatter import format_postgresql_routine
         restored = format_postgresql_routine(restored, formatter_indent)
+        if source_dialect == "sybase_asa":
+            progress(94, 'Checking approved migration references')
+            from database import DATABASE_PATH
+            from migration_references import apply_relevant_references
+            restored, reference_trace, reference_matches = apply_relevant_references(
+                text, restored, source_dialect, target_dialect,
+                database_path or DATABASE_PATH,
+            )
+            trace.extend(reference_trace)
+            from migration_brain import relevant_brain_lessons
+            brain_lessons = relevant_brain_lessons(text, source_dialect, target_dialect)
         restored = _annotate_unresolved_metadata(restored, diagnostics)
         from cte_analyzer import analyze_cte_suitability, cte_trace
         cte_analysis = implemented_ctes + analyze_cte_suitability(restored)
@@ -196,6 +219,8 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
     skill["cte_analysis"] = cte_analysis
     skill["diagnostics"] = diagnostics
     skill["catalog_review"] = catalog_review
+    skill["references"] = reference_matches
+    skill["brain_lessons"] = brain_lessons
     skill["technical_status"] = "needs_modification" if any(
         item["severity"] == "error" and not item["resolved"] for item in diagnostics
     ) else "success"

@@ -165,6 +165,24 @@ formatting differences do not invalidate an otherwise identical release. Set
 `DBOBJECT_MASKING_DATABASE_PATH` to use an explicit database path for testing
 or managed deployments.
 
+### Approved migration references
+
+After Test Migrate, edit the PostgreSQL draft in the **Corrected / Reference**
+tab and save it with a reviewer name. The tool stores the ASA input, generated
+draft, approved correction, structural features, notes, and exact reusable edit
+blocks in SQLite. Future ASA migrations rank structurally similar references.
+Only an approved correction fragment that exactly occurs in the new generated
+draft is applied automatically; broader similarities are displayed in the
+Skills Used trace for human review. This prevents object-specific SQL from being
+copied blindly into another routine.
+
+Saving a reference also writes an immutable, sanitized YAML lesson under
+`brain/lessons/`. The YAML contains masked identifiers and anonymized string
+literals only. Reviewer identity, project paths, connections, and raw SQL stay
+in local SQLite. Commit reviewed lesson files to Git so other installations can
+discover them. Lessons are retrieval evidence; context-sensitive behavior must
+still be promoted into a tested renderer before broad automatic application.
+
 Function return types and overloads are not maintained as a static list.  When
 a target connection is available, `result_metadata.py` queries `pg_catalog`
 first (the authoritative catalog for that PostgreSQL server version), then the

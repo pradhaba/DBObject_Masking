@@ -220,6 +220,33 @@ CREATE TABLE IF NOT EXISTS language_elements (
     enabled INTEGER NOT NULL DEFAULT 1,
     UNIQUE(source_dialect, target_dialect, element_code, catalog_version)
 );
+CREATE TABLE IF NOT EXISTS migration_references (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    processing_run_id INTEGER NOT NULL REFERENCES processing_runs(id) ON DELETE CASCADE,
+    source_dialect TEXT NOT NULL,
+    target_dialect TEXT NOT NULL,
+    source_ddl TEXT NOT NULL,
+    generated_ddl TEXT NOT NULL,
+    corrected_ddl TEXT NOT NULL,
+    feature_json TEXT NOT NULL DEFAULT '[]',
+    reviewer TEXT NOT NULL,
+    review_notes TEXT NOT NULL DEFAULT '',
+    approved_at TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT,
+    knowledge_path TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS migration_reference_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference_id INTEGER NOT NULL REFERENCES migration_references(id) ON DELETE CASCADE,
+    before_text TEXT NOT NULL,
+    after_text TEXT NOT NULL,
+    occurrence_order INTEGER NOT NULL,
+    auto_apply INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_migration_references_dialects ON migration_references
+    (source_dialect,target_dialect,enabled,approved_at);
 CREATE INDEX IF NOT EXISTS idx_language_elements_lookup ON language_elements
     (source_dialect,target_dialect,catalog_version,enabled,review_status,priority);
 CREATE INDEX IF NOT EXISTS idx_objects_project ON project_objects(project_id);
@@ -274,6 +301,9 @@ LANGUAGE_ELEMENT_COLUMNS = {
     "target_version": "TEXT NOT NULL DEFAULT ''",
     "verification_status": "TEXT NOT NULL DEFAULT 'verified'",
 }
+MIGRATION_REFERENCE_COLUMNS = {
+    "knowledge_path": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 def now() -> str:
@@ -293,6 +323,7 @@ def connect(path: Path = DATABASE_PATH) -> sqlite3.Connection:
         _upgrade_columns(connection, "processing_runs", RUN_COLUMNS)
         _upgrade_columns(connection, "skill_rules", RULE_COLUMNS)
         _upgrade_columns(connection, "language_elements", LANGUAGE_ELEMENT_COLUMNS)
+        _upgrade_columns(connection, "migration_references", MIGRATION_REFERENCE_COLUMNS)
         _seed_rules(connection)
         _seed_skill_versions(connection)
         _retire_auto_approved_versions(connection)
@@ -1235,6 +1266,75 @@ def set_processing_review(run_id: int, decision: str, reviewer: str = "", notes:
                WHERE id=?""",
             (decision, reviewer.strip() or None, now() if reviewer.strip() else None, notes.strip(), run_id),
         )
+
+
+def create_migration_reference(run_id: int, corrected_ddl: str, reviewer: str,
+                               notes: str = "", path: Path = DATABASE_PATH,
+                               brain_dir: Path | None = None) -> int:
+    """Save an approved source/draft/correction lesson and reusable exact edits."""
+    if not reviewer.strip():
+        raise ValueError("Enter the reviewer name before saving a reference.")
+    if not corrected_ddl.strip():
+        raise ValueError("Corrected PostgreSQL DDL is required.")
+    from migration_references import extract_reference_corrections, source_features
+    with closing(connect(path)) as db, db:
+        run = db.execute("SELECT * FROM processing_runs WHERE id=?", (run_id,)).fetchone()
+        if run is None or run["operation"] != "migrate":
+            raise ValueError("A completed Test Migrate run is required.")
+        existing = db.execute(
+            "SELECT * FROM migration_references WHERE processing_run_id=? AND corrected_ddl=?",
+            (run_id, corrected_ddl.strip()),
+        ).fetchone()
+        if existing:
+            corrections = extract_reference_corrections(run["output_ddl"], corrected_ddl.strip())
+            from migration_brain import export_masked_lesson
+            knowledge_path = export_masked_lesson(
+                dict(run), corrected_ddl.strip(), corrections, brain_dir
+            )
+            db.execute(
+                "UPDATE migration_references SET knowledge_path=? WHERE id=?",
+                (str(knowledge_path), existing["id"]),
+            )
+            return existing["id"]
+        cursor = db.execute(
+            """INSERT INTO migration_references
+            (processing_run_id,source_dialect,target_dialect,source_ddl,generated_ddl,
+             corrected_ddl,feature_json,reviewer,review_notes,approved_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (run_id, run["source_dialect"], run["target_dialect"], run["input_ddl"],
+             run["output_ddl"], corrected_ddl.strip(),
+             json.dumps(sorted(source_features(run["input_ddl"]))), reviewer.strip(),
+             notes.strip(), now()),
+        )
+        reference_id = cursor.lastrowid
+        corrections = extract_reference_corrections(run["output_ddl"], corrected_ddl.strip())
+        db.executemany(
+            """INSERT INTO migration_reference_corrections
+            (reference_id,before_text,after_text,occurrence_order,auto_apply)
+            VALUES (?,?,?,?,1)""",
+            [(reference_id, before, after, order)
+             for order, (before, after) in enumerate(corrections, start=1)],
+        )
+        from migration_brain import export_masked_lesson
+        knowledge_path = export_masked_lesson(
+            dict(run), corrected_ddl.strip(), corrections, brain_dir
+        )
+        db.execute(
+            "UPDATE migration_references SET knowledge_path=? WHERE id=?",
+            (str(knowledge_path), reference_id),
+        )
+        return reference_id
+
+
+def list_migration_references(path: Path = DATABASE_PATH) -> list[dict]:
+    with closing(connect(path)) as db:
+        rows = db.execute(
+            """SELECT r.*,
+            (SELECT COUNT(*) FROM migration_reference_corrections c
+             WHERE c.reference_id=r.id AND c.auto_apply=1) AS correction_count
+            FROM migration_references r ORDER BY approved_at DESC,id DESC"""
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def latest_mapping(project_id: str, object_path: str = "", path: Path = DATABASE_PATH):

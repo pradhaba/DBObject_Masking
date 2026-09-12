@@ -124,6 +124,10 @@ def process_action(mode_var, source_dialect_var, target_dialect_var, embed_var, 
             if source_metadata_connection is not None:
                 source_metadata_connection.close()
         set_readonly_text(target_text, migrated_text)
+        corrected_text = run_context.get('corrected_text') if run_context else None
+        if corrected_text is not None:
+            corrected_text.delete('1.0', tk.END)
+            corrected_text.insert('1.0', migrated_text)
         set_readonly_text(mapping_text, json.dumps(mapping, indent=2, sort_keys=True))
         set_readonly_text(skill_text, format_skill_trace(skill))
         run_id = persist_processing(
@@ -283,6 +287,25 @@ def format_skill_trace(skill):
         lines.append(f"Line {item['line']}: {rules or 'No migration rule applied'}")
         lines.append(f"  Source: {item['source']}")
         lines.append(f"  Output: {item['output']}")
+    references = skill.get('references', [])
+    if references:
+        lines.extend(["", "Approved migration references", "=" * 72])
+        for item in references:
+            lines.append(
+                f"Reference #{item['reference_id']} • similarity {item['similarity']:.3f} • "
+                f"applied corrections {item['applied_corrections']} • reviewer {item['reviewer']}"
+            )
+            if item.get('notes'):
+                lines.append(f"  Notes: {item['notes']}")
+    brain_lessons = skill.get('brain_lessons', [])
+    if brain_lessons:
+        lines.extend(["", "Repository migration brain", "=" * 72])
+        for item in brain_lessons:
+            lines.append(
+                f"Lesson {item['lesson_id']} • similarity {item['similarity']:.3f} • "
+                f"masked corrections {item['correction_count']}"
+            )
+            lines.append(f"  YAML: {item['knowledge_path']}")
     return '\n'.join(lines)
 
 
@@ -362,7 +385,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
                      if key == 'test_plan_callback' or key.endswith('_var') or key in {
                          'issue_table', 'issue_detail', 'detail_tabs', 'issues_tab',
                          'approval_button', 'migrate_button', 'review_callback',
-                         'progress_widget'
+                         'progress_widget', 'corrected_text'
                      }}
         run_context.clear()
         run_context.update(preserved)
@@ -378,6 +401,8 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         if run_context.get('progress_status_var') is not None:
             run_context['progress_status_var'].set('Ready — waiting for Test Migrate')
         show_migration_diagnostics(run_context, [], 'not_run', 'pending_review')
+        if run_context.get('corrected_text') is not None:
+            run_context['corrected_text'].delete('1.0', tk.END)
 
     if initial_files:
         ttk.Label(control_frame, text='Selected object:').grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
@@ -513,11 +538,13 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
 
     source_frame = ttk.Frame(workspace_tabs)
     target_frame = ttk.Frame(workspace_tabs)
+    corrected_tab = ttk.Frame(workspace_tabs)
     mapping_tab = ttk.Frame(workspace_tabs)
     skill_tab = ttk.Frame(workspace_tabs)
     issues_tab = ttk.Frame(workspace_tabs)
     workspace_tabs.add(source_frame, text='Input DDL')
     workspace_tabs.add(target_frame, text='Output DDL')
+    workspace_tabs.add(corrected_tab, text='Corrected / Reference')
     workspace_tabs.add(mapping_tab, text='JSON Mapping')
     workspace_tabs.add(skill_tab, text='Skills Used')
     workspace_tabs.add(issues_tab, text='Error Review (0)')
@@ -532,6 +559,17 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     target_text.configure(xscrollcommand=target_xscroll.set)
     target_xscroll.pack(side=tk.BOTTOM, fill=tk.X)
     target_text.pack(fill=tk.BOTH, expand=True)
+    corrected_header = ttk.Label(
+        corrected_tab,
+        text='Edit the generated PostgreSQL below, then save it as an approved migration reference.',
+        padding=6,
+    )
+    corrected_header.pack(fill=tk.X)
+    corrected_text = scrolledtext.ScrolledText(corrected_tab, wrap=tk.NONE)
+    corrected_xscroll = ttk.Scrollbar(corrected_tab, orient=tk.HORIZONTAL, command=corrected_text.xview)
+    corrected_text.configure(xscrollcommand=corrected_xscroll.set)
+    corrected_xscroll.pack(side=tk.BOTTOM, fill=tk.X)
+    corrected_text.pack(fill=tk.BOTH, expand=True)
     mapping_text = scrolledtext.ScrolledText(mapping_tab, wrap=tk.NONE, state='disabled')
     mapping_text.pack(fill=tk.BOTH, expand=True)
     skill_text = scrolledtext.ScrolledText(skill_tab, wrap=tk.WORD, state='disabled')
@@ -560,6 +598,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         issue_table=issue_table, issue_detail=issue_detail, detail_tabs=workspace_tabs,
         issues_tab=issues_tab, technical_status_var=technical_status_var,
         review_status_var=review_status_var, diagnostics=[],
+        corrected_text=corrected_text,
     )
 
     def load_issue_detail(_event=None):
@@ -645,6 +684,33 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     ttk.Button(review_actions, text='Needs modification', command=lambda: set_review('needs_modification')).pack(side=tk.LEFT)
     ttk.Button(review_actions, text='Approve', command=lambda: set_review('approved')).pack(side=tk.LEFT, padx=6)
     ttk.Button(review_actions, text='Reject', command=lambda: set_review('rejected')).pack(side=tk.LEFT)
+
+    def save_reference():
+        run_id = run_context.get('run_id')
+        reviewer = reviewer_var.get().strip()
+        corrected = corrected_text.get('1.0', tk.END).strip()
+        if not run_id:
+            review_message_var.set('Run Test Migrate before saving a migration reference.')
+            return
+        if not reviewer:
+            review_message_var.set('Enter the reviewer name before saving a migration reference.')
+            return
+        try:
+            from database import create_migration_reference
+            reference_id = create_migration_reference(
+                run_id, corrected, reviewer, review_notes_var.get().strip()
+            )
+        except Exception as exc:
+            review_message_var.set(f'Unable to save migration reference: {exc}')
+            return
+        review_message_var.set(
+            f'Approved migration reference #{reference_id} saved. Future ASA migrations will check it.'
+        )
+        workspace_tabs.select(corrected_tab)
+
+    ttk.Button(
+        review_actions, text='Save corrected as reference', command=save_reference
+    ).pack(side=tk.LEFT, padx=(18, 0))
 
     run_context.update(
         reviewer_var=reviewer_var, review_notes_var=review_notes_var,
