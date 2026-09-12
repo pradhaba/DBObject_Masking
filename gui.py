@@ -549,6 +549,12 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     workspace_tabs.add(skill_tab, text='Skills Used')
     workspace_tabs.add(issues_tab, text='Error Review (0)')
 
+    reviewer_var = tk.StringVar()
+    review_notes_var = tk.StringVar()
+    review_message_var = tk.StringVar(
+        value='Run Test Migrate, paste the approved PostgreSQL, enter a reviewer, then save.'
+    )
+
     source_text = scrolledtext.ScrolledText(source_frame, wrap=tk.NONE)
     source_xscroll = ttk.Scrollbar(source_frame, orient=tk.HORIZONTAL, command=source_text.xview)
     source_text.configure(xscrollcommand=source_xscroll.set)
@@ -565,6 +571,26 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         padding=6,
     )
     corrected_header.pack(fill=tk.X)
+    corrected_actions = ttk.Frame(corrected_tab, padding=(6, 3))
+    corrected_actions.pack(side=tk.BOTTOM, fill=tk.X)
+    ttk.Label(corrected_actions, text='Reviewer:').grid(row=0, column=0, sticky=tk.W)
+    ttk.Entry(corrected_actions, textvariable=reviewer_var, width=28).grid(
+        row=0, column=1, sticky=tk.EW, padx=(6, 18)
+    )
+    ttk.Label(corrected_actions, text='Notes:').grid(row=0, column=2, sticky=tk.W)
+    ttk.Entry(corrected_actions, textvariable=review_notes_var).grid(
+        row=0, column=3, sticky=tk.EW, padx=6
+    )
+    corrected_save_button = ttk.Button(
+        corrected_actions,
+        text='Save corrected as reference',
+        command=lambda: run_context.get('save_reference_callback', lambda: None)(),
+    )
+    corrected_save_button.grid(row=0, column=4, padx=(6, 0))
+    ttk.Label(
+        corrected_actions, textvariable=review_message_var, foreground='#075985', wraplength=1000
+    ).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
+    corrected_actions.columnconfigure(3, weight=1)
     corrected_text = scrolledtext.ScrolledText(corrected_tab, wrap=tk.NONE)
     corrected_xscroll = ttk.Scrollbar(corrected_tab, orient=tk.HORIZONTAL, command=corrected_text.xview)
     corrected_text.configure(xscrollcommand=corrected_xscroll.set)
@@ -621,11 +647,6 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
 
     review_form = ttk.Frame(issues_tab, padding=(6, 3))
     review_form.pack(fill=tk.X)
-    reviewer_var = tk.StringVar()
-    review_notes_var = tk.StringVar()
-    review_message_var = tk.StringVar(
-        value='Review the findings. Approval is available only when no unresolved errors remain.'
-    )
     ttk.Label(review_form, text='Reviewer:').grid(row=0, column=0, sticky=tk.W)
     ttk.Entry(review_form, textvariable=reviewer_var, width=28).grid(
         row=0, column=1, sticky=tk.EW, padx=(6, 18)
@@ -690,22 +711,40 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
         reviewer = reviewer_var.get().strip()
         corrected = corrected_text.get('1.0', tk.END).strip()
         if not run_id:
-            review_message_var.set('Run Test Migrate before saving a migration reference.')
+            message = 'Run Test Migrate before saving a migration reference.'
+            review_message_var.set(message)
+            messagebox.showwarning('Migration reference', message)
             return
         if not reviewer:
-            review_message_var.set('Enter the reviewer name before saving a migration reference.')
+            message = 'Enter the reviewer name before saving a migration reference.'
+            review_message_var.set(message)
+            messagebox.showwarning('Migration reference', message)
+            return
+        if not corrected:
+            message = 'Paste the corrected PostgreSQL into the Corrected / Reference tab.'
+            review_message_var.set(message)
+            messagebox.showwarning('Migration reference', message)
             return
         try:
-            from database import create_migration_reference
+            from database import create_migration_reference, list_migration_references
             reference_id = create_migration_reference(
                 run_id, corrected, reviewer, review_notes_var.get().strip()
             )
         except Exception as exc:
-            review_message_var.set(f'Unable to save migration reference: {exc}')
+            message = f'Unable to save migration reference: {exc}'
+            review_message_var.set(message)
+            messagebox.showerror('Migration reference', message)
             return
-        review_message_var.set(
-            f'Approved migration reference #{reference_id} saved. Future ASA migrations will check it.'
+        saved = next(
+            (item for item in list_migration_references() if item['id'] == reference_id), {}
         )
+        knowledge_path = saved.get('knowledge_path') or 'brain/lessons'
+        message = (
+            f'Approved migration reference #{reference_id} saved.\n'
+            f'YAML lesson: {knowledge_path}'
+        )
+        review_message_var.set(message.replace('\n', ' — '))
+        messagebox.showinfo('Migration reference saved', message)
         workspace_tabs.select(corrected_tab)
 
     ttk.Button(
@@ -715,6 +754,7 @@ def build_gui(root=None, initial_files=None, initial_action='mask', initial_dial
     run_context.update(
         reviewer_var=reviewer_var, review_notes_var=review_notes_var,
         review_message_var=review_message_var, review_callback=set_review,
+        save_reference_callback=save_reference,
     )
 
     def source_changed(_event=None):
