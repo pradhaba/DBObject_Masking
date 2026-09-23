@@ -1,0 +1,158 @@
+lesson_id: 196c176f7b1f84449618
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- CREATE_PROCEDURE
+- ELSE
+- JOIN
+- NESTED_SELECT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_7(IN @PARAM_40 INTEGER)\nBEGIN\n    declare @VAR_41 INTEGER;\n\
+    \nSELECT\n    COL_9\ninto\n    @VAR_41\nFROM\n    SCHEMA_1.TBL_2\nwhere\n    COL_8 = @PARAM_40;\n\n\
+    SELECT \n         TBL_2.COL_16 as x_account_id,\n         TBL_6.COL_13 as x_staff_first_name,\n  \
+    \       TBL_6.COL_35 as x_staff_last_name,\n         TBL_2.COL_38 as x_amount,\n         TBL_2.COL_10\
+    \ as x_deposit_amount,\n        'TEXT_LITERAL_1' as x_product,\n         TBL_2.COL_24 as x_reference,\n\
+    \         TBL_1.COL_39 as x_vip_number,\n         ( Case\n        when TBL_4.COL_37 in ('TEXT_LITERAL_2',\
+    \ 'TEXT_LITERAL_3', 'TEXT_LITERAL_4', 'TEXT_LITERAL_5', 'TEXT_LITERAL_6') \n           Then TBL_4.COL_37\n\
+    \        Else ( Case\n            when TBL_4.COL_20 = 'TEXT_LITERAL_7' then 'TEXT_LITERAL_2'\n   \
+    \         when TBL_4.COL_20 = 'TEXT_LITERAL_8' then 'TEXT_LITERAL_4'\n            else 'TEXT_LITERAL_9'\n\
+    \        end)\n    end ) as x_customer_title, \n         TBL_3.COL_13 as x_customer_first_name,\n\
+    \         left(TBL_3.COL_17, 1) as x_customer_middle_initial,\n         TBL_3.COL_35 as x_customer_last_name,\n\
+    \         TBL_3.COL_12 as x_customer_email,\n         TBL_3.COL_18 as x_customer_mobile_phone,\n \
+    \        TBL_3.COL_21 as x_customer_home_phone,\n         TBL_3.COL_11 as x_customer_dob, \n     \
+    \    TBL_2.COL_25,   \n         TBL_2.COL_30 as x_reference2,\n         TBL_2.COL_27 as x_currency,\n\
+    \         TBL_2.COL_32 as x_test,   \n         TBL_2.COL_26 as x_amount2,   \n         TBL_2.COL_28\
+    \ as x_gateway_reference,   \n         TBL_2.COL_33 x_timestamp ,      \n         TBL_2.COL_31 as\
+    \ x_result,   \n         TBL_2.COL_29 x_message,   \n         TBL_2.COL_34\nFROM\n    SCHEMA_1.TBL_2\n\
+    left outer join SCHEMA_1.TBL_6 on\n    TBL_6.COL_15 = TBL_2.COL_23\nleft outer join SCHEMA_1.TBL_3\
+    \ on\n    TBL_3.COL_19 = TBL_2.COL_19\nleft outer join SCHEMA_1.TBL_5 on\n    TBL_5.COL_14 = TBL_3.COL_22\n\
+    left outer join SCHEMA_1.TBL_4 on\n    TBL_3.COL_36 = TBL_4.COL_36\nleft outer join SCHEMA_1.TBL_1\
+    \ on\n    TBL_1.COL_19 = TBL_2.COL_19\nWhere\n    TBL_2.COL_9 = @VAR_41\nEND;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(IN @PARAM_40 INTEGER)\nRETURNS SETOF RECORD\
+    \ /* MIGRATION REVIEW: one or more result datatypes are unidentified; see Error Review */\nLANGUAGE\
+    \ sql\nAS $function$\nDECLARE\n@VAR_41 INTEGER;\nBEGIN\n\n\tSELECT\n\tALIAS_1.COL_9\n\tINTO\n\t@VAR_41\n\
+    \tFROM SCHEMA_1.TBL_2 AS ALIAS_1\n\tWHERE\n\tALIAS_1.COL_8 = @PARAM_40;\n\n\tRETURN QUERY\n\tSELECT\n\
+    \t\tALIAS_1.COL_16 AS x_account_id\n\t\t, ALIAS_2.COL_13 AS x_staff_first_name\n\t\t, ALIAS_2.COL_35\
+    \ AS x_staff_last_name\n\t\t, ALIAS_1.COL_38 AS x_amount\n\t\t, ALIAS_1.COL_10 AS x_deposit_amount\n\
+    \t\t, 'TEXT_LITERAL_1' AS x_product\n\t\t, ALIAS_1.COL_24 AS x_reference\n\t\t, ALIAS_6.COL_39 AS\
+    \ x_vip_number\n\t\t, ( CASE\n\t\tWHEN ALIAS_5.COL_37 IN ('TEXT_LITERAL_2', 'TEXT_LITERAL_3', 'TEXT_LITERAL_4',\
+    \ 'TEXT_LITERAL_5', 'TEXT_LITERAL_6')\n\t\tTHEN ALIAS_5.COL_37\n\t\tELSE ( CASE\n\t\tWHEN ALIAS_5.COL_20\
+    \ = 'TEXT_LITERAL_7' THEN 'TEXT_LITERAL_2'\n\t\tWHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_8' THEN 'TEXT_LITERAL_4'\n\
+    \t\tELSE 'TEXT_LITERAL_9'\n\t\tEND)\n\t\tEND ) AS x_customer_title\n\t\t, ALIAS_3.COL_13 AS x_customer_first_name\n\
+    \t\t, LEFT(ALIAS_3.COL_17, 1) AS x_customer_middle_initial\n\t\t, ALIAS_3.COL_35 AS x_customer_last_name\n\
+    \t\t, ALIAS_3.COL_12 AS x_customer_email\n\t\t, ALIAS_3.COL_18 AS x_customer_mobile_phone\n\t\t, ALIAS_3.COL_21\
+    \ AS x_customer_home_phone\n\t\t, ALIAS_3.COL_11 AS x_customer_dob\n\t\t, ALIAS_1.COL_25\n\t\t, ALIAS_1.COL_30\
+    \ AS x_reference2\n\t\t, ALIAS_1.COL_27 AS x_currency\n\t\t, ALIAS_1.COL_32 AS x_test\n\t\t, ALIAS_1.COL_26\
+    \ AS x_amount2\n\t\t, ALIAS_1.COL_28 AS x_gateway_reference\n\t\t, ALIAS_1.COL_33 x_timestamp\n\t\t\
+    , ALIAS_1.COL_31 AS x_result\n\t\t, ALIAS_1.COL_29 x_message\n\t\t, ALIAS_1.COL_34\n\tFROM SCHEMA_1.TBL_2\
+    \ AS ALIAS_1\n\tLEFT OUTER JOIN SCHEMA_1.TBL_6 AS ALIAS_2 ON\n\tALIAS_2.COL_15 = ALIAS_1.COL_23\n\t\
+    LEFT OUTER JOIN SCHEMA_1.TBL_3 AS ALIAS_3 ON\n\tALIAS_3.COL_19 = ALIAS_1.COL_19\n\tLEFT OUTER JOIN\
+    \ SCHEMA_1.TBL_5 AS ALIAS_4 ON\n\tALIAS_4.COL_14 = ALIAS_3.COL_22\n\tLEFT OUTER JOIN SCHEMA_1.TBL_4\
+    \ AS ALIAS_5 ON\n\tALIAS_3.COL_36 = ALIAS_5.COL_36\n\tLEFT OUTER JOIN SCHEMA_1.TBL_1 AS ALIAS_6 ON\n\
+    \tALIAS_6.COL_19 = ALIAS_1.COL_19\n\tWHERE\n\tALIAS_1.COL_9 = @VAR_41;\nEND;\n$function$;"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(\n    @PARAM_40 INTEGER\n)\nRETURNS TABLE\
+    \ (\n    x_account_id       TEXT,\n    x_staff_first_name TEXT,\n    x_staff_last_name  TEXT,\n  \
+    \  x_amount           NUMERIC,\n    x_deposit_amount   NUMERIC,\n    x_product          TEXT,\n  \
+    \  x_reference        TEXT,\n    x_vip_number       TEXT,\n    x_customer_title   TEXT,\n    x_customer_first_name\
+    \ TEXT,\n    x_customer_middle_initial TEXT,\n    x_customer_last_name TEXT,\n    x_customer_email\
+    \   TEXT,\n    x_customer_mobile_phone TEXT,\n    x_customer_home_phone TEXT,\n    x_customer_dob\
+    \     DATE,\n    COL_25             TEXT,\n    x_reference2       TEXT,\n    x_currency         TEXT,\n\
+    \    x_test             BOOLEAN,\n    x_amount2          NUMERIC,\n    x_gateway_reference TEXT,\n\
+    \    x_timestamp        TIMESTAMP,\n    x_result           TEXT,\n    x_message          TEXT,\n \
+    \   COL_34           TIMESTAMP\n)\nLANGUAGE plpgsql\nAS $function$\n/**************************************\n\
+    23.12.2020 Yuri Shchelkanov SIR#26222\n11.09.2026 Bapuji Pradhan, SIR#44652\n***************************************/\n\
+    DECLARE\n    @VAR_41 INTEGER;\nBEGIN\n    SELECT ALIAS_1.COL_9\n    INTO @VAR_41\n    FROM SCHEMA_1.TBL_2\
+    \ AS ALIAS_1\n    WHERE ALIAS_1.COL_8 = @PARAM_40\n    LIMIT 1;\n\n    RETURN QUERY\n    SELECT\n\
+    \        ALIAS_1.COL_16::TEXT AS x_account_id,\n        ALIAS_2.COL_13::TEXT AS x_staff_first_name,\n\
+    \        ALIAS_2.COL_35::TEXT AS x_staff_last_name,\n        ALIAS_1.COL_38 AS x_amount,\n       \
+    \ ALIAS_1.COL_10 AS x_deposit_amount,\n        'TEXT_LITERAL_1'::TEXT AS x_product,\n        ALIAS_1.COL_24::TEXT\
+    \ AS x_reference,\n        ALIAS_6.COL_39::TEXT AS x_vip_number,\n        (CASE\n            WHEN\
+    \ ALIAS_5.COL_37 IN ('TEXT_LITERAL_2','TEXT_LITERAL_3','TEXT_LITERAL_4','TEXT_LITERAL_5','TEXT_LITERAL_6')\
+    \ THEN ALIAS_5.COL_37\n            ELSE CASE\n                WHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_7'\
+    \ THEN 'TEXT_LITERAL_2'\n                WHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_8' THEN 'TEXT_LITERAL_4'\n\
+    \                ELSE 'TEXT_LITERAL_9'\n            END\n        END)::TEXT AS x_customer_title,\n\
+    \        ALIAS_3.COL_13::TEXT AS x_customer_first_name,\n        LEFT(ALIAS_3.COL_17,1)::TEXT AS x_customer_middle_initial,\n\
+    \        ALIAS_3.COL_35::TEXT AS x_customer_last_name,\n        ALIAS_3.COL_12::TEXT AS x_customer_email,\n\
+    \        ALIAS_3.COL_18::TEXT AS x_customer_mobile_phone,\n        ALIAS_3.COL_21::TEXT AS x_customer_home_phone,\n\
+    \        ALIAS_3.COL_11 AS x_customer_dob,\n        ALIAS_1.COL_25::TEXT,\n        ALIAS_1.COL_30::TEXT\
+    \ AS x_reference2,\n        ALIAS_1.COL_27::TEXT AS x_currency,\n        (ALIAS_1.COL_32 <> 0) AS\
+    \ x_test,\n        ALIAS_1.COL_26 AS x_amount2,\n        ALIAS_1.COL_28::TEXT AS x_gateway_reference,\n\
+    \        ALIAS_1.COL_33 AS x_timestamp,\n        ALIAS_1.COL_31::TEXT AS x_result,\n        ALIAS_1.COL_29::TEXT\
+    \ AS x_message,\n        ALIAS_1.COL_34\n    FROM SCHEMA_1.TBL_2 AS ALIAS_1\n    LEFT JOIN SCHEMA_1.TBL_6\
+    \ AS ALIAS_2 ON ALIAS_2.COL_15 = ALIAS_1.COL_23\n    LEFT JOIN SCHEMA_1.TBL_3 AS ALIAS_3 ON ALIAS_3.COL_19\
+    \ = ALIAS_1.COL_19\n    LEFT JOIN SCHEMA_1.TBL_5 AS ALIAS_4 ON ALIAS_4.COL_14 = ALIAS_3.COL_22\n \
+    \   LEFT JOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON ALIAS_3.COL_36 = ALIAS_5.COL_36\n    LEFT JOIN SCHEMA_1.TBL_1\
+    \ AS ALIAS_6 ON ALIAS_6.COL_19 = ALIAS_1.COL_19\n    WHERE ALIAS_1.COL_9 = @VAR_41;\nEND;\n$function$;"
+corrections:
+- before_masked: 'CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(IN @PARAM_40 INTEGER)
+
+    RETURNS SETOF RECORD /* MIGRATION REVIEW: one or more result datatypes are unidentified; see Error
+    Review */
+
+    LANGUAGE sql
+
+    '
+  after_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(\n    @PARAM_40 INTEGER\n)\nRETURNS TABLE\
+    \ (\n    x_account_id       TEXT,\n    x_staff_first_name TEXT,\n    x_staff_last_name  TEXT,\n  \
+    \  x_amount           NUMERIC,\n    x_deposit_amount   NUMERIC,\n    x_product          TEXT,\n  \
+    \  x_reference        TEXT,\n    x_vip_number       TEXT,\n    x_customer_title   TEXT,\n    x_customer_first_name\
+    \ TEXT,\n    x_customer_middle_initial TEXT,\n    x_customer_last_name TEXT,\n    x_customer_email\
+    \   TEXT,\n    x_customer_mobile_phone TEXT,\n    x_customer_home_phone TEXT,\n    x_customer_dob\
+    \     DATE,\n    COL_25             TEXT,\n    x_reference2       TEXT,\n    x_currency         TEXT,\n\
+    \    x_test             BOOLEAN,\n    x_amount2          NUMERIC,\n    x_gateway_reference TEXT,\n\
+    \    x_timestamp        TIMESTAMP,\n    x_result           TEXT,\n    x_message          TEXT,\n \
+    \   COL_34           TIMESTAMP\n)\nLANGUAGE plpgsql\n"
+  reuse: exact_or_renderer_review
+- before_masked: '@VAR_41 INTEGER;
+
+    '
+  after_masked: '    @VAR_41 INTEGER;
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: "\tSELECT\n\tALIAS_1.COL_9\n\tINTO\n\t@VAR_41\n\tFROM SCHEMA_1.TBL_2 AS ALIAS_1\n\tWHERE\n\
+    \tALIAS_1.COL_8 = @PARAM_40;\n\n\tRETURN QUERY\n\tSELECT\n\t\tALIAS_1.COL_16 AS x_account_id\n\t\t\
+    , ALIAS_2.COL_13 AS x_staff_first_name\n\t\t, ALIAS_2.COL_35 AS x_staff_last_name\n\t\t, ALIAS_1.COL_38\
+    \ AS x_amount\n\t\t, ALIAS_1.COL_10 AS x_deposit_amount\n\t\t, 'TEXT_LITERAL_1' AS x_product\n\t\t\
+    , ALIAS_1.COL_24 AS x_reference\n\t\t, ALIAS_6.COL_39 AS x_vip_number\n\t\t, ( CASE\n\t\tWHEN ALIAS_5.COL_37\
+    \ IN ('TEXT_LITERAL_2', 'TEXT_LITERAL_3', 'TEXT_LITERAL_4', 'TEXT_LITERAL_5', 'TEXT_LITERAL_6')\n\t\
+    \tTHEN ALIAS_5.COL_37\n\t\tELSE ( CASE\n\t\tWHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_7' THEN 'TEXT_LITERAL_2'\n\
+    \t\tWHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_8' THEN 'TEXT_LITERAL_4'\n\t\tELSE 'TEXT_LITERAL_9'\n\t\t\
+    END)\n\t\tEND ) AS x_customer_title\n\t\t, ALIAS_3.COL_13 AS x_customer_first_name\n\t\t, LEFT(ALIAS_3.COL_17,\
+    \ 1) AS x_customer_middle_initial\n\t\t, ALIAS_3.COL_35 AS x_customer_last_name\n\t\t, ALIAS_3.COL_12\
+    \ AS x_customer_email\n\t\t, ALIAS_3.COL_18 AS x_customer_mobile_phone\n\t\t, ALIAS_3.COL_21 AS x_customer_home_phone\n\
+    \t\t, ALIAS_3.COL_11 AS x_customer_dob\n\t\t, ALIAS_1.COL_25\n\t\t, ALIAS_1.COL_30 AS x_reference2\n\
+    \t\t, ALIAS_1.COL_27 AS x_currency\n\t\t, ALIAS_1.COL_32 AS x_test\n\t\t, ALIAS_1.COL_26 AS x_amount2\n\
+    \t\t, ALIAS_1.COL_28 AS x_gateway_reference\n\t\t, ALIAS_1.COL_33 x_timestamp\n\t\t, ALIAS_1.COL_31\
+    \ AS x_result\n\t\t, ALIAS_1.COL_29 x_message\n\t\t, ALIAS_1.COL_34\n\tFROM SCHEMA_1.TBL_2 AS ALIAS_1\n\
+    \tLEFT OUTER JOIN SCHEMA_1.TBL_6 AS ALIAS_2 ON\n\tALIAS_2.COL_15 = ALIAS_1.COL_23\n\tLEFT OUTER JOIN\
+    \ SCHEMA_1.TBL_3 AS ALIAS_3 ON\n\tALIAS_3.COL_19 = ALIAS_1.COL_19\n\tLEFT OUTER JOIN SCHEMA_1.TBL_5\
+    \ AS ALIAS_4 ON\n\tALIAS_4.COL_14 = ALIAS_3.COL_22\n\tLEFT OUTER JOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON\n\
+    \tALIAS_3.COL_36 = ALIAS_5.COL_36\n\tLEFT OUTER JOIN SCHEMA_1.TBL_1 AS ALIAS_6 ON\n\tALIAS_6.COL_19\
+    \ = ALIAS_1.COL_19\n\tWHERE\n\tALIAS_1.COL_9 = @VAR_41;\n"
+  after_masked: "    RETURN QUERY\n    SELECT\n        ALIAS_1.COL_16::TEXT AS x_account_id,\n       \
+    \ ALIAS_2.COL_13::TEXT AS x_staff_first_name,\n        ALIAS_2.COL_35::TEXT AS x_staff_last_name,\n\
+    \        ALIAS_1.COL_38 AS x_amount,\n        ALIAS_1.COL_10 AS x_deposit_amount,\n        'TEXT_LITERAL_1'::TEXT\
+    \ AS x_product,\n        ALIAS_1.COL_24::TEXT AS x_reference,\n        ALIAS_6.COL_39::TEXT AS x_vip_number,\n\
+    \        (CASE\n            WHEN ALIAS_5.COL_37 IN ('TEXT_LITERAL_2','TEXT_LITERAL_3','TEXT_LITERAL_4','TEXT_LITERAL_5','TEXT_LITERAL_6')\
+    \ THEN ALIAS_5.COL_37\n            ELSE CASE\n                WHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_7'\
+    \ THEN 'TEXT_LITERAL_2'\n                WHEN ALIAS_5.COL_20 = 'TEXT_LITERAL_8' THEN 'TEXT_LITERAL_4'\n\
+    \                ELSE 'TEXT_LITERAL_9'\n            END\n        END)::TEXT AS x_customer_title,\n\
+    \        ALIAS_3.COL_13::TEXT AS x_customer_first_name,\n        LEFT(ALIAS_3.COL_17,1)::TEXT AS x_customer_middle_initial,\n\
+    \        ALIAS_3.COL_35::TEXT AS x_customer_last_name,\n        ALIAS_3.COL_12::TEXT AS x_customer_email,\n\
+    \        ALIAS_3.COL_18::TEXT AS x_customer_mobile_phone,\n        ALIAS_3.COL_21::TEXT AS x_customer_home_phone,\n\
+    \        ALIAS_3.COL_11 AS x_customer_dob,\n        ALIAS_1.COL_25::TEXT,\n        ALIAS_1.COL_30::TEXT\
+    \ AS x_reference2,\n        ALIAS_1.COL_27::TEXT AS x_currency,\n        (ALIAS_1.COL_32 <> 0) AS\
+    \ x_test,\n        ALIAS_1.COL_26 AS x_amount2,\n        ALIAS_1.COL_28::TEXT AS x_gateway_reference,\n\
+    \        ALIAS_1.COL_33 AS x_timestamp,\n        ALIAS_1.COL_31::TEXT AS x_result,\n        ALIAS_1.COL_29::TEXT\
+    \ AS x_message,\n        ALIAS_1.COL_34\n    FROM SCHEMA_1.TBL_2 AS ALIAS_1\n    LEFT JOIN SCHEMA_1.TBL_6\
+    \ AS ALIAS_2 ON ALIAS_2.COL_15 = ALIAS_1.COL_23\n    LEFT JOIN SCHEMA_1.TBL_3 AS ALIAS_3 ON ALIAS_3.COL_19\
+    \ = ALIAS_1.COL_19\n    LEFT JOIN SCHEMA_1.TBL_5 AS ALIAS_4 ON ALIAS_4.COL_14 = ALIAS_3.COL_22\n \
+    \   LEFT JOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON ALIAS_3.COL_36 = ALIAS_5.COL_36\n    LEFT JOIN SCHEMA_1.TBL_1\
+    \ AS ALIAS_6 ON ALIAS_6.COL_19 = ALIAS_1.COL_19\n    WHERE ALIAS_1.COL_9 = @VAR_41;\n"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

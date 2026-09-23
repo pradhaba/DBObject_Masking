@@ -1,0 +1,92 @@
+lesson_id: d8b9d913ee1f74a0fc75
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- CREATE_PROCEDURE
+- DELETE
+- ELSE
+- EXISTS
+- FIRST
+- IF
+- JOIN
+- NESTED_SELECT
+- RESULT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_5(in @PARAM_18 integer)\nRESULT ( COL_15 integer )\n\
+    begin\n\ndeclare @VAR_20 integer default -1;\n//\ndeclare @VAR_19 INTEGER/*WAS SMALL*/ default 0;\n\
+    //\n    if sf_check_mode( 'TEXT_LITERAL_1', String( @PARAM_18 ), 'TEXT_LITERAL_2', 'TEXT_LITERAL_2',\
+    \ 'TEXT_LITERAL_2' ) = 0 then\n//    if not exists (SELECT first TBL_3.COL_9\n//        FROM SCHEMA_1.TBL_3\n\
+    //            LEFT OUTER JOIN TBL_2 ON TBL_3.COL_16 = VAR_21\n//        where COL_10 = 'TEXT_LITERAL_1'\n\
+    //            and COL_11 = @PARAM_18\n//            and\tCOL_12 = 'TEXT_LITERAL_2'\n//           \
+    \ and COL_13 = 'TEXT_LITERAL_2'\n//            and COL_14 = 'TEXT_LITERAL_2') then\n        SELECT\n\
+    \    security_status\ninto\n    @VAR_19\nFROM\n    TBL_1\nWHERE\n    COL_6 = 'TEXT_LITERAL_3';\n//\n\
+    \        if coalesce(@VAR_19, 0) = 1 then\n            if (\nSELECT\n    (case\n        when TBL_4.COL_7\
+    \ > 0\n            and TBL_4.COL_8 = 'TEXT_LITERAL_4' then 'TEXT_LITERAL_5'\n            when TBL_4.COL_7\
+    \ > 0\n            and TBL_4.COL_8 = 'TEXT_LITERAL_6' then 'TEXT_LITERAL_4'\n            when TBL_4.COL_7\
+    \ is null then 'TEXT_LITERAL_6'\n        end)\nFROM\n    TBL_4\nWhere\n    COL_17 = @PARAM_18) < 3\
+    \ then\n// can be continue\n                Delete\nFrom\n    SCHEMA_1.TBL_4\nWhere\n    TBL_4.COL_17\
+    \ = @PARAM_18;\n//\n                select 0 into @VAR_20;\nelse\n// This form is already processed.~r~nForm\
+    \ cannot be deleted.\n                select\n    -4\ninto\n    @VAR_20;\nend if;\n//            \n\
+    else\n// action not allowed\n            select\n    -3\ninto\n    @VAR_20;\nend if;\nelse\n// lock\
+    \ record (This form is currently in use by user:~r~n)\n        select\n    -2\ninto\n    @VAR_20;\n\
+    end if;\n//\n    select @VAR_20;\nend;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_5(IN @PARAM_18 INTEGER)\nRETURNS TABLE (\n\
+    \tCOL_15 INTEGER\n)\nLANGUAGE sql\nAS $function$\nDECLARE\n@VAR_20 INTEGER DEFAULT -1;\n@VAR_19 INTEGER\
+    \  DEFAULT 0;\nBEGIN\n\n\tIF SCHEMA_1.sf_check_mode( 'TEXT_LITERAL_1', CONCAT( @PARAM_18 ), 'TEXT_LITERAL_2',\
+    \ 'TEXT_LITERAL_2', 'TEXT_LITERAL_2' ) = 0 THEN\n\n\t\tSELECT\n\t\tALIAS_1.security_status\n\t\tINTO\n\
+    \t\t@VAR_19\n\t\tFROM SCHEMA_1.TBL_1 AS ALIAS_1\n\t\tWHERE\n\t\tALIAS_1.COL_6 = 'TEXT_LITERAL_3';\n\
+    \n\t\tIF COALESCE(@VAR_19, 0) = 1 THEN\n\t\t\tIF (\n\t\t\tSELECT\n\t\t\t(CASE\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ > 0\n\t\t\tAND ALIAS_2.COL_8 = 'TEXT_LITERAL_4' THEN 'TEXT_LITERAL_5'\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ > 0\n\t\t\tAND ALIAS_2.COL_8 = 'TEXT_LITERAL_6' THEN 'TEXT_LITERAL_4'\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ IS NULL THEN 'TEXT_LITERAL_6'\n\t\t\tEND)\n\t\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_2\n\t\t\tWHERE\n\t\
+    \t\tALIAS_2.COL_17 = @PARAM_18) < 3 THEN\n\n\t\t\tDELETE\n\t\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_2\n\t\
+    \t\tWHERE\n\t\t\tALIAS_2.COL_17 = @PARAM_18;\n\n\t\t\tSELECT 0 INTO SCHEMA_1.@VAR_20;\n\t\tELSE\n\n\
+    \t\t\tSELECT\n\t\t\t-4\n\t\t\tINTO\n\t\t\t@VAR_20;\n\t\tEND IF;\n\n\tELSE\n\n\t\tSELECT\n\t\t-3\n\t\
+    \tINTO\n\t\t@VAR_20;\n\tEND IF;\nELSE\n\n\tSELECT\n\t-2\n\tINTO\n\t@VAR_20;\nEND IF;\n\nRETURN QUERY\n\
+    SELECT @VAR_20;\nEND;\n$function$;"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_5(IN @PARAM_18 INTEGER)\nRETURNS INTEGER\n\
+    LANGUAGE plpgsql\nAS $function$\nDECLARE\n    @VAR_20 INTEGER := -1;\n    @VAR_19 INTEGER := 0;\n\
+    \    check_val INTEGER;\nBEGIN\n\tIF SCHEMA_1.sf_check_mode('TEXT_LITERAL_1', @PARAM_18::text, 'TEXT_LITERAL_2',\
+    \ 'TEXT_LITERAL_2', 'TEXT_LITERAL_2') = 0 THEN\n\t\tSELECT ALIAS_1.security_status\n\t\tINTO @VAR_19\n\
+    \t\tFROM SCHEMA_1.TBL_1 AS ALIAS_1\n\t\tWHERE ALIAS_1.COL_6 = 'TEXT_LITERAL_3';\n\t\n\t\tIF COALESCE(@VAR_19,\
+    \ 0) = 1 THEN\n\t\t\tSELECT CASE\n\t\t\t\t\tWHEN ALIAS_2.COL_7 > 0 AND ALIAS_2.COL_8 = 'TEXT_LITERAL_4'\
+    \ THEN 3\n\t\t\t\t\tWHEN ALIAS_2.COL_7 > 0 AND ALIAS_2.COL_8 = 'TEXT_LITERAL_6' THEN 1\n\t\t\t\t\t\
+    WHEN ALIAS_2.COL_7 IS NULL THEN 0\n\t\t\t\tEND\n\t\t\tINTO check_val\n\t\t\tFROM SCHEMA_1.TBL_4 AS\
+    \ ALIAS_2\n\t\t\tWHERE ALIAS_2.COL_17 = @PARAM_18;\n\t\n\t\t\tIF check_val < 3 THEN\n\t\t\t\tDELETE\
+    \ FROM SCHEMA_1.TBL_4 AS ALIAS_2\n\t\t\t\tWHERE ALIAS_2.COL_17 = @PARAM_18;\n\t\t\t\t@VAR_20 := 0;\n\
+    \t\t\tELSE\n\t\t\t\t@VAR_20 := -4;\n\t\t\tEND IF;\n\t\tELSE\n\t\t\t@VAR_20 := -3;\n\t\tEND IF;\n\t\
+    ELSE\n\t\t@VAR_20 := -2;\n\tEND IF;\n\n\tRETURN @VAR_20;\nEND;\n$function$;"
+corrections:
+- before_masked: "RETURNS TABLE (\n\tCOL_15 INTEGER\n)\nLANGUAGE sql\n"
+  after_masked: 'RETURNS INTEGER
+
+    LANGUAGE plpgsql
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: '@VAR_20 INTEGER DEFAULT -1;
+
+    @VAR_19 INTEGER  DEFAULT 0;
+
+    '
+  after_masked: "    @VAR_20 INTEGER := -1;\n    @VAR_19 INTEGER := 0;\n    check_val INTEGER;\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tIF SCHEMA_1.sf_check_mode( 'TEXT_LITERAL_1', CONCAT( @PARAM_18 ), 'TEXT_LITERAL_2',\
+    \ 'TEXT_LITERAL_2', 'TEXT_LITERAL_2' ) = 0 THEN\n\n\t\tSELECT\n\t\tALIAS_1.security_status\n\t\tINTO\n\
+    \t\t@VAR_19\n\t\tFROM SCHEMA_1.TBL_1 AS ALIAS_1\n\t\tWHERE\n\t\tALIAS_1.COL_6 = 'TEXT_LITERAL_3';\n\
+    \n\t\tIF COALESCE(@VAR_19, 0) = 1 THEN\n\t\t\tIF (\n\t\t\tSELECT\n\t\t\t(CASE\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ > 0\n\t\t\tAND ALIAS_2.COL_8 = 'TEXT_LITERAL_4' THEN 'TEXT_LITERAL_5'\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ > 0\n\t\t\tAND ALIAS_2.COL_8 = 'TEXT_LITERAL_6' THEN 'TEXT_LITERAL_4'\n\t\t\tWHEN ALIAS_2.COL_7\
+    \ IS NULL THEN 'TEXT_LITERAL_6'\n\t\t\tEND)\n\t\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_2\n\t\t\tWHERE\n\t\
+    \t\tALIAS_2.COL_17 = @PARAM_18) < 3 THEN\n\n\t\t\tDELETE\n\t\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_2\n\t\
+    \t\tWHERE\n\t\t\tALIAS_2.COL_17 = @PARAM_18;\n\n\t\t\tSELECT 0 INTO SCHEMA_1.@VAR_20;\n\t\tELSE\n\n\
+    \t\t\tSELECT\n\t\t\t-4\n\t\t\tINTO\n\t\t\t@VAR_20;\n\t\tEND IF;\n\n\tELSE\n\n\t\tSELECT\n\t\t-3\n\t\
+    \tINTO\n\t\t@VAR_20;\n\tEND IF;\nELSE\n\n\tSELECT\n\t-2\n\tINTO\n\t@VAR_20;\nEND IF;\n\nRETURN QUERY\n\
+    SELECT @VAR_20;\n"
+  after_masked: "\tRETURN @VAR_20;\n"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

@@ -1,0 +1,367 @@
+lesson_id: 56e05f466f46c283a949
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- ELSE
+- NESTED_SELECT
+- RESULT
+- SELECT
+- TOP
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_10\n(\nin @PARAM_48 INTEGER,\nin @PARAM_54 VARCHAR (10),\n\
+    in @PARAM_49 INTEGER,\nin @PARAM_51 COL_17,\nin @PARAM_52 COL_17,\nin @PARAM_55 VARCHAR (30),\nin\
+    \ @PARAM_50 VARCHAR (30),\nin @PARAM_53 INTEGER\n)\nRESULT(\nCOL_15 INTEGER,\nCOL_13 INTEGER,\nCOL_47\
+    \ NUMERIC(20, 2),\nCOL_18 NUMERIC(20, 2),\nCOL_19 NUMERIC(20, 2),\nCOL_29 INTEGER,\nCOL_35 NUMERIC(20,\
+    \ 2),\nCOL_36 NUMERIC(20, 2),\nCOL_40 VARCHAR(25),\nCOL_37 NVARCHAR(25),\nCOL_39 VARCHAR(255),\nCOL_38\
+    \ VARCHAR(25),\nCOL_42 TIMESTAMP,\nCOL_41 BIT,\nCOL_43 TIMESTAMP,\nCOL_32 INTEGER /* WAS SMALL */,\n\
+    COL_22 INTEGER,\nCOL_16 COL_17,\nCOL_27 NUMERIC(19, 2),\nVAR_58 INTEGER,\nCOL_20 VARCHAR(50),\nCOL_30\
+    \ VARCHAR(100),\nCOL_25 VARCHAR(25),\nCOL_28 INTEGER,\nCOL_34 VARCHAR(25)\n)\n//******************************************************\n\
+    // Created: 20.11.2020 By: Yuri Shchelkanov\n// SIR:     #26222\n// What:\tGet Certegy Applications\n\
+    //******************************************************\n// Modified: 21.12.2020 By: Yuri Shchelkanov\n\
+    // \"SELECT SCHEMA_1.\"sf_get_patient_info\"(TBL_1.COL_29,8,0)) as COL_30,\"\n// Prepared: 07.04.2021\
+    \ By Gritsenko\n// SIR: #22336 File : WEBR2_001.sql\n//******************************************************\n\
+    BEGIN\n    DECLARE VAR_58 int;\n\nDECLARE @VAR_56 INTEGER;\n\nDECLARE @VAR_57 VARCHAR(100);\n\nSELECT\n\
+    \    SCHEMA_1.\"sf_get_param_value\"('TEXT_LITERAL_1',\n    0)\nINTO\n    @VAR_57\nFrom\n    TBL_3;\n\
+    \nSET\n@VAR_56 = cast(@VAR_57 as integer);\n\nSELECT\n    TBL_1.COL_15,   \n         TBL_1.COL_13,\
+    \   \n         TBL_1.COL_47,   \n         TBL_1.COL_18,   \n         TBL_1.COL_19,   \n         TBL_1.COL_29,\
+    \   \n         TBL_1.COL_35,   \n         TBL_1.COL_36,   \n         case\n        when TBL_1.COL_12\
+    \ = 'TEXT_LITERAL_2'\n        or TBL_1.COL_12 is null then TBL_1.COL_40\n        else TBL_1.COL_12\n\
+    \    end case\n        as COL_40,\n         TBL_1.COL_37,   \n         TBL_1.COL_39,   \n        \
+    \ TBL_1.COL_38,   \n         TBL_1.COL_42,   \n         TBL_1.COL_41,   \n         TBL_1.COL_43, \
+    \  \n         TBL_1.COL_32,\n         TBL_2.COL_22,\n         (\n        Select\n            TBL_9.COL_17\n\
+    \        From\n            TBL_9\n        Where\n            VAR_58 = TBL_9.COL_45\n         ) as\
+    \ COL_16,\n         (\n        Select\n            Sum(TBL_5.COL_11)\n        From\n            TBL_5\
+    \ ,\n            TBL_6\n        Where\n            TBL_5.COL_29 in (\n            Select\n       \
+    \         COL_29\n            From\n                TBL_4 \"fam\"\n            Where\n           \
+    \     \"fam\".COL_21 = (\n                SELECT\n                    COL_21\n                FROM\n\
+    \                    TBL_4 \"head\"\n                WHERE\n                    \"head\".COL_29 =\
+    \ TBL_1.COL_29) )\n            and\n                  TBL_5.COL_31 = TBL_6.COL_23\n            and\
+    \ \n                  (TRIM(TBL_6.COL_14) = convert(varchar(25), TBL_2.COL_22)\n                or\
+    \ TRIM(TBL_6.COL_14) = TBL_1.COL_34)\n                and\n                  TBL_6.COL_26 = @VAR_56\n\
+    \                and\n                  TBL_5.COL_46 = VAR_58\n          ) as COL_27,\n         (\n\
+    \        Select\n            TOP 1 TBL_9.COL_45\n        From\n            TBL_5 ,\n            TBL_6\
+    \ ,\n            TBL_9\n        Where\n            COL_29 in (\n            Select\n             \
+    \   COL_29\n            From\n                TBL_4 \"fam\"\n            Where\n                \"\
+    fam\".COL_21 = (\n                SELECT\n                    COL_21\n                FROM\n     \
+    \               TBL_4 \"head\"\n                WHERE\n                    \"head\".COL_29 = TBL_1.COL_29)\
+    \ )\n            and\n                  TBL_5.COL_31 = TBL_6.COL_23\n            and \n          \
+    \        (TRIM(TBL_6.COL_14) = convert(varchar(25), TBL_2.COL_22)\n                or TRIM(TBL_6.COL_14)\
+    \ = TBL_1.COL_34)\n                and\n                  TBL_5.COL_46 = TBL_9.COL_45\n          \
+    \      and \n                  TBL_6.COL_26 = @VAR_56\n            Order by\n                TBL_9.COL_17,\n\
+    \                TBL_9.COL_45 desc\n         ) as VAR_58,\n         TBL_8.COL_20,\n        (\n   \
+    \     SELECT\n            SCHEMA_1.\"sf_get_patient_info\"(TBL_1.COL_29,\n            8,\n       \
+    \     0)) as COL_30,\n        //@surname + 'TEXT_LITERAL_3' + Coalesce(@title_name + 'TEXT_LITERAL_4','TEXT_LITERAL_2')\
+    \ + @firstname + 'TEXT_LITERAL_5' + @patients_cart_num as COL_30,\n        \tTBL_1.COL_25 as COL_25,\n\
+    \        ( Case\n            When @PARAM_48 > 0 \n               THEN\n                  (\n     \
+    \       SELECT\n                COL_21\n            FROM\n                TBL_4 \"head\"\n       \
+    \     WHERE\n                \"head\".COL_29 = @PARAM_48)\n            ELSE NULL\n        END ) as\
+    \ COL_28,\n        TBL_1.COL_34\n    FROM\n        TBL_1,\n        TBL_2 ,\n        TBL_8 ,\n    \
+    \    TBL_4 ,\n        TBL_7\n    Where\n        ( TBL_8.COL_32 = TBL_1.COL_32 )\n        and\n\t\t\
+    \t( TBL_1.COL_24 = 1 )\n        and\n\t\t\t( TBL_1.COL_13 = TBL_2.COL_13 )\n        and\n\t\t\t( TBL_4.COL_29\
+    \ = TBL_1.COL_29 )\n        and \n\t\t\t( TBL_4.COL_44 = TBL_7.COL_44 )\n        and\n         ( (\
+    \ TBL_1.COL_29 = @PARAM_48\n            and @PARAM_54 = 'TEXT_LITERAL_6' )\n        or \n        \
+    \   ( @PARAM_54 = 'TEXT_LITERAL_7'\n            and TBL_1.COL_29 in (\n            Select\n      \
+    \          COL_29\n            From\n                TBL_4 \"fam\"\n            Where\n          \
+    \      \"fam\".COL_21 = COL_28 ) )\n        or \n           ( @PARAM_48 = 0 ) )\n        and\n\t\t\
+    \t( @PARAM_49 = 999\n            or ( TBL_1.COL_32 = @PARAM_49\n                and @PARAM_49 > 0)\
+    \ )\n        and\n         ( (COL_17(TBL_1.COL_43) >= @PARAM_51\n            and COL_17(TBL_1.COL_43)\
+    \ <= @PARAM_52 )\n            OR @PARAM_53 = 9)\n        and\n\t\t(\n\t\t\t(UPPER(TBL_1.COL_40 ) =\
+    \ UPPER(@PARAM_55)\n            AND (TBL_1.COL_12 = 'TEXT_LITERAL_2'\n                or TBL_1.COL_12\
+    \ is null))\n        or (@PARAM_55 = 'TEXT_LITERAL_8')\n            or (@PARAM_55 = 'TEXT_LITERAL_9'\n\
+    \                and UPPER(TBL_1.COL_12 ) = 'TEXT_LITERAL_10')\n                or (@PARAM_55 = 'TEXT_LITERAL_11'\n\
+    \                    and UPPER(TBL_1.COL_12 ) = 'TEXT_LITERAL_12')\n\t\t)\n        and\n         (\
+    \ COL_25 = @PARAM_50\n            OR @PARAM_50 = 'TEXT_LITERAL_13')\n    END;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_10(\n\tIN @PARAM_48 INTEGER\n\t, IN @PARAM_54\
+    \ TEXT\n\t, IN @PARAM_49 INTEGER\n\t, IN @PARAM_51 COL_17\n\t, IN @PARAM_52 COL_17\n\t, IN @PARAM_55\
+    \ TEXT\n\t, IN @PARAM_50 TEXT\n\t, IN @PARAM_53 INTEGER\n)\nRETURNS TABLE (\n\tCOL_15 INTEGER\n\t\
+    , COL_13 INTEGER\n\t, COL_47 NUMERIC(20, 2)\n\t, COL_18 NUMERIC(20, 2)\n\t, COL_19 NUMERIC(20, 2)\n\
+    \t, COL_29 INTEGER\n\t, COL_35 NUMERIC(20, 2)\n\t, COL_36 NUMERIC(20, 2)\n\t, COL_40 TEXT\n\t, COL_37\
+    \ NVARCHAR(25)\n\t, COL_39 TEXT\n\t, COL_38 TEXT\n\t, COL_42 TIMESTAMP\n\t, COL_41 BOOLEAN\n\t, COL_43\
+    \ TIMESTAMP\n\t, COL_32 INTEGER\n\t, COL_22 INTEGER\n\t, COL_16 COL_17\n\t, COL_27 NUMERIC(19, 2)\n\
+    \t, VAR_58 INTEGER\n\t, COL_20 TEXT\n\t, COL_30 TEXT\n\t, COL_25 TEXT\n\t, COL_28 INTEGER\n\t, COL_34\
+    \ TEXT\n)\nLANGUAGE sql\nAS $function$\nDECLARE\nVAR_58 INTEGER;\n@VAR_56 INTEGER;\n@VAR_57 TEXT;\n\
+    BEGIN\n\n\tSELECT\n\tSCHEMA_1.\"sf_get_param_value\"('TEXT_LITERAL_1',\n\t0)\n\tINTO\n\t@VAR_57\n\t\
+    FROM SCHEMA_1.TBL_3 AS ALIAS_1;\n\n\t@VAR_56 := CAST(@VAR_57 AS INTEGER);\n\n\tRETURN QUERY\n\tSELECT\n\
+    \t\tALIAS_7.COL_15\n\t\t, ALIAS_7.COL_13\n\t\t, ALIAS_7.COL_47\n\t\t, ALIAS_7.COL_18\n\t\t, ALIAS_7.COL_19\n\
+    \t\t, ALIAS_7.COL_29\n\t\t, ALIAS_7.COL_35\n\t\t, ALIAS_7.COL_36\n\t\t, (CASE\n\t\tWHEN ALIAS_7.COL_12\
+    \ = 'TEXT_LITERAL_2'\n\t\tOR ALIAS_7.COL_12 IS NULL THEN ALIAS_7.COL_40\n\t\tELSE ALIAS_7.COL_12\n\
+    \t\tEND CASE)::TEXT AS COL_40\n\t\t, ALIAS_7.COL_37\n\t\t, ALIAS_7.COL_39::TEXT\n\t\t, ALIAS_7.COL_38::TEXT\n\
+    \t\t, ALIAS_7.COL_42\n\t\t, ALIAS_7.COL_41\n\t\t, ALIAS_7.COL_43\n\t\t, ALIAS_7.COL_32\n\t\t, ALIAS_8.COL_22\n\
+    \t\t, (\n\t\tSELECT\n\t\tALIAS_2.COL_17\n\t\tFROM SCHEMA_1.TBL_9 AS ALIAS_2\n\t\tWHERE\n\t\tVAR_58\
+    \ = ALIAS_2.COL_45\n\t\t) AS COL_16,\n\t\t(\n\t\tSELECT\n\t\tSUM(ALIAS_3.COL_11)\n\t\tFROM SCHEMA_1.TBL_5\
+    \ AS ALIAS_3\n\t\tJOIN SCHEMA_1.TBL_6 AS ALIAS_4 ON ALIAS_3.COL_31 = ALIAS_4.COL_23\n\t\tWHERE\n\t\
+    \tALIAS_3.COL_29 IN (\n\t\tSELECT\n\t\tALIAS_5.COL_29\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_5\n\t\tWHERE\n\
+    \t\tALIAS_5.COL_21 = (\n\t\tSELECT\n\t\tALIAS_6.COL_21\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_6\n\t\tWHERE\n\
+    \t\tALIAS_6.COL_29 = ALIAS_7.COL_29) )\n\t\tAND (TRIM(ALIAS_4.COL_14) = CONVERT(TEXT, ALIAS_8.COL_22)\n\
+    \t\tOR TRIM(ALIAS_4.COL_14) = ALIAS_7.COL_34)\n\t\tAND ALIAS_4.COL_26 = @VAR_56\n\t\tAND ALIAS_3.COL_46\
+    \ = VAR_58\n\t\t) AS COL_27,\n\t\t(\n\t\tSELECT ALIAS_2.COL_45\n\t\tFROM SCHEMA_1.TBL_5 AS ALIAS_3\n\
+    \t\tJOIN SCHEMA_1.TBL_6 AS ALIAS_4 ON ALIAS_3.COL_31 = ALIAS_4.COL_23\n\t\tJOIN SCHEMA_1.TBL_9 AS\
+    \ ALIAS_2 ON ALIAS_3.COL_46 = ALIAS_2.COL_45\n\t\tWHERE\n\t\tALIAS_3.COL_29 IN (\n\t\tSELECT\n\t\t\
+    ALIAS_5.COL_29\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_5\n\t\tWHERE\n\t\tALIAS_5.COL_21 = (\n\t\tSELECT\n\t\
+    \tALIAS_6.COL_21\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_6\n\t\tWHERE\n\t\tALIAS_6.COL_29 = ALIAS_7.COL_29)\
+    \ )\n\t\tAND (TRIM(ALIAS_4.COL_14) = CONVERT(TEXT, ALIAS_8.COL_22)\n\t\tOR TRIM(ALIAS_4.COL_14) =\
+    \ ALIAS_7.COL_34)\n\t\tAND ALIAS_4.COL_26 = @VAR_56\n\t\tORDER BY\n\t\tALIAS_2.COL_17,\n\t\tALIAS_2.COL_45\
+    \ DESC\n\t\tLIMIT 1) AS VAR_58,\n\t\tALIAS_9.COL_20::TEXT,\n\t\t((\n\t\tSELECT\n\t\tSCHEMA_1.\"sf_get_patient_info\"\
+    (ALIAS_7.COL_29,\n\t\t8,\n\t\t0)))::TEXT AS COL_30\n\t\t, ALIAS_7.COL_25::TEXT AS COL_25\n\t\t, (\
+    \ CASE\n\t\tWHEN @PARAM_48 > 0\n\t\tTHEN\n\t\t(\n\t\tSELECT\n\t\tALIAS_6.COL_21\n\t\tFROM SCHEMA_1.TBL_4\
+    \ ALIAS_6\n\t\tWHERE\n\t\tALIAS_6.COL_29 = @PARAM_48)\n\t\tELSE NULL\n\t\tEND ) AS COL_28,\n\t\tALIAS_7.COL_34::TEXT\n\
+    \tFROM SCHEMA_1.TBL_1 AS ALIAS_7\n\tJOIN SCHEMA_1.TBL_2 AS ALIAS_8\n\t\tON ALIAS_7.COL_13 = ALIAS_8.COL_13\n\
+    \tJOIN SCHEMA_1.TBL_8 AS ALIAS_9\n\t\tON ALIAS_9.COL_32 = ALIAS_7.COL_32\n\tJOIN SCHEMA_1.TBL_4 AS\
+    \ ALIAS_5\n\t\tON ALIAS_5.COL_29 = ALIAS_7.COL_29\n\tJOIN SCHEMA_1.TBL_7 AS ALIAS_10\n\t\tON ALIAS_5.COL_44\
+    \ = ALIAS_10.COL_44\n\tWHERE\n\tALIAS_7.COL_24 = 1\n\t\tAND ( ( ALIAS_7.COL_29 = @PARAM_48\n\t\t\t\
+    AND @PARAM_54 = 'TEXT_LITERAL_6' )\n\t\t\tOR\n\t\t\t( @PARAM_54 = 'TEXT_LITERAL_7'\n\t\t\tAND ALIAS_7.COL_29\
+    \ IN (\n\t\t\tSELECT\n\t\t\tALIAS_5.COL_29\n\t\t\tFROM SCHEMA_1.TBL_4 ALIAS_5\n\t\t\tWHERE\n\t\t\t\
+    ALIAS_5.COL_21 = COL_28 ) )\n\t\t\tOR\n\t\t\t( @PARAM_48 = 0 ) )\n\t\tAND ( @PARAM_49 = 999\n\t\t\t\
+    OR ( ALIAS_7.COL_32 = @PARAM_49\n\t\t\tAND @PARAM_49 > 0) )\n\t\tAND ( (SCHEMA_1.COL_17(ALIAS_7.COL_43)\
+    \ >= @PARAM_51\n\t\t\tAND SCHEMA_1.COL_17(ALIAS_7.COL_43) <= @PARAM_52 )\n\t\t\tOR @PARAM_53 = 9)\n\
+    \t\tAND (\n\t\t\t(UPPER(ALIAS_7.COL_40 ) = UPPER(@PARAM_55)\n\t\t\tAND (ALIAS_7.COL_12 = 'TEXT_LITERAL_2'\n\
+    \t\t\tOR ALIAS_7.COL_12 IS NULL))\n\t\t\tOR (@PARAM_55 = 'TEXT_LITERAL_8')\n\t\t\tOR (@PARAM_55 =\
+    \ 'TEXT_LITERAL_9'\n\t\t\tAND UPPER(ALIAS_7.COL_12 ) = 'TEXT_LITERAL_10')\n\t\t\tOR (@PARAM_55 = 'TEXT_LITERAL_11'\n\
+    \t\t\tAND UPPER(ALIAS_7.COL_12 ) = 'TEXT_LITERAL_12')\n\t\t\t)\n\t\tAND ( ALIAS_7.COL_25 = @PARAM_50\n\
+    \t\t\tOR @PARAM_50 = 'TEXT_LITERAL_13')\nEND;\n$function$;"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_10(\n\tIN @PARAM_48 INTEGER,\n\tIN @PARAM_54\
+    \ TEXT,\n\tIN @PARAM_49 INTEGER,\n\tIN @PARAM_51 COL_17,\n\tIN @PARAM_52 COL_17,\n\tIN @PARAM_55 TEXT,\n\
+    \tIN @PARAM_50 TEXT,\n\tIN @PARAM_53 INTEGER\n)\nRETURNS TABLE (\n\tCOL_15 INTEGER,\n\tCOL_13 INTEGER,\n\
+    \tCOL_47 NUMERIC(20,2),\n\tCOL_18 NUMERIC(20,2),\n\tCOL_19 NUMERIC(20,2),\n\tCOL_29 INTEGER,\n\tCOL_35\
+    \ NUMERIC(20,2),\n\tCOL_36 NUMERIC(20,2),\n\tCOL_40 TEXT,\n\tCOL_37 VARCHAR(25),\n\tCOL_39 TEXT,\n\
+    \tCOL_38 TEXT,\n\tCOL_42 TIMESTAMP,\n\tCOL_41 BOOLEAN,\n\tCOL_43 TIMESTAMP,\n\tCOL_32 SMALLINT,\n\t\
+    COL_22 INTEGER,\n\tCOL_16 COL_17,\n\tCOL_27 NUMERIC(19,2),\n\tCOL_33 INTEGER,\n\tCOL_20 TEXT,\n\t\
+    COL_30 TEXT,\n\tCOL_25 TEXT,\n\tCOL_28 INTEGER,\n\tCOL_34 TEXT\n)\nLANGUAGE plpgsql\nAS $function$\n\
+    /*****************************************\n20.11.2020 Yuri Shchelkanov, SIR#26222\n21.12.2020 Yuri\
+    \ Shchelkanov\n22.09.2026 Bapuji Pradhan, SIR#44652\n******************************************/\n\
+    DECLARE\n\t@VAR_56 INTEGER;\nBEGIN\n\tSELECT SCHEMA_1.sf_get_param_value('TEXT_LITERAL_1', 0)::INTEGER\n\
+    \tINTO @VAR_56;\n\t\n\tRETURN QUERY\n\tWITH receipt_cte AS (\n\t\tSELECT ALIAS_1.COL_29 AS COL_29,\n\
+    \t\t\tALIAS_3.COL_45 AS COL_33,\n\t\t\tALIAS_3.COL_17 AS COL_16\n\t\tFROM SCHEMA_1.TBL_5 ALIAS_1\n\
+    \t\tJOIN SCHEMA_1.TBL_6 ALIAS_2 ON ALIAS_1.COL_31 = ALIAS_2.COL_23\n\t\tJOIN SCHEMA_1.TBL_9 ALIAS_3\
+    \ ON ALIAS_1.COL_46 = ALIAS_3.COL_45\n\t\tWHERE ALIAS_2.COL_26 = @VAR_56\n\t\tORDER BY ALIAS_3.COL_17,\
+    \ ALIAS_3.COL_45 DESC\n\t),\n\tpaid_cte AS (\n\t\tSELECT ALIAS_1.COL_29 AS COL_29,\n\t\t\tALIAS_1.COL_46\
+    \ AS COL_33,\n\t\t\tSUM(ALIAS_1.COL_11) AS COL_27\n\t\tFROM SCHEMA_1.TBL_5 ALIAS_1\n\t\tJOIN SCHEMA_1.TBL_6\
+    \ ALIAS_2 ON ALIAS_1.COL_31 = ALIAS_2.COL_23\n\t\tWHERE ALIAS_2.COL_26 = @VAR_56\n\t\tGROUP BY ALIAS_1.COL_29,\
+    \ ALIAS_1.COL_46\n\t)\n\tSELECT\n\t\tALIAS_5.COL_15,\n\t\tALIAS_5.COL_13,\n\t\tALIAS_5.COL_47,\n\t\
+    \tALIAS_5.COL_18,\n\t\tALIAS_5.COL_19,\n\t\tALIAS_5.COL_29,\n\t\tALIAS_5.COL_35,\n\t\tALIAS_5.COL_36,\n\
+    \t\tCOALESCE(NULLIF(ALIAS_5.COL_12,'TEXT_LITERAL_2'), ALIAS_5.COL_40)::TEXT AS COL_40,\n\t\tALIAS_5.COL_37,\n\
+    \t\tALIAS_5.COL_39::TEXT,\n\t\tALIAS_5.COL_38::TEXT,\n\t\tALIAS_5.COL_42,\n\t\t(ALIAS_5.COL_41 <>\
+    \ 0) AS COL_41,\n\t\tALIAS_5.COL_43,\n\t\tALIAS_5.COL_32,\n\t\tALIAS_6.COL_22,\n\t\tr.COL_16,\n\t\t\
+    p.COL_27,\n\t\tr.COL_33 AS COL_33,\n\t\tALIAS_7.COL_20::TEXT,\n\t\tSCHEMA_1.sf_get_patient_info(ALIAS_5.COL_29,\
+    \ 8, 0)::TEXT AS COL_30,\n\t\tALIAS_5.COL_25::TEXT,\n\t\tCASE WHEN @PARAM_48 > 0\n\t\t\tTHEN (SELECT\
+    \ ALIAS_4.COL_21 FROM SCHEMA_1.TBL_4 ALIAS_4 WHERE ALIAS_4.COL_29 = @PARAM_48)\n\t\t\tELSE NULL END\
+    \ AS COL_28,\n\t\tALIAS_5.COL_34::TEXT\n\tFROM SCHEMA_1.TBL_1 ALIAS_5\n\tJOIN SCHEMA_1.TBL_2 ALIAS_6\
+    \ ON ALIAS_5.COL_13 = ALIAS_6.COL_13\n\tJOIN SCHEMA_1.TBL_8 ALIAS_7 ON ALIAS_7.COL_32 = ALIAS_5.COL_32\n\
+    \tJOIN SCHEMA_1.TBL_4 ALIAS_8 ON ALIAS_8.COL_29 = ALIAS_5.COL_29\n\tJOIN SCHEMA_1.TBL_7 ALIAS_9 ON\
+    \ ALIAS_8.COL_44 = ALIAS_9.COL_44\n\tLEFT JOIN receipt_cte r ON r.COL_29 = ALIAS_5.COL_29\n\tLEFT\
+    \ JOIN paid_cte p ON p.COL_29 = ALIAS_5.COL_29 AND p.COL_33 = r.COL_33\n\tWHERE ALIAS_5.COL_24 = 1\n\
+    \tAND (\n\t\t(ALIAS_5.COL_29 = @PARAM_48 AND @PARAM_54 = 'TEXT_LITERAL_6')\n\t\tOR (TRIM(@PARAM_54)\
+    \ = 'TEXT_LITERAL_7' AND ALIAS_5.COL_29 IN (\n\t\t\tSELECT ALIAS_8.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_8\
+    \ WHERE ALIAS_8.COL_21 = CASE WHEN @PARAM_48 > 0\n\t\t\t\tTHEN (SELECT ALIAS_4.COL_21 FROM SCHEMA_1.TBL_4\
+    \ ALIAS_4 WHERE ALIAS_4.COL_29 = @PARAM_48)\n\t\t\t\tELSE NULL END ))\n\t\tOR (@PARAM_48 = 0)\n\t\
+    )\n\tAND (@PARAM_49 = 999 OR (ALIAS_5.COL_32 = @PARAM_49 AND @PARAM_49 > 0))\n\tAND (\n\t\t(ALIAS_5.COL_43::COL_17\
+    \ BETWEEN @PARAM_51 AND @PARAM_52)\n\t\tOR @PARAM_53 = 9\n\t)\n\tAND (\n\t\t(UPPER(ALIAS_5.COL_40)\
+    \ = UPPER(@PARAM_55) AND (ALIAS_5.COL_12 = 'TEXT_LITERAL_2' OR ALIAS_5.COL_12 IS NULL))\n\t\tOR (@PARAM_55\
+    \ = 'TEXT_LITERAL_8')\n\t\tOR (@PARAM_55 = 'TEXT_LITERAL_9' AND UPPER(ALIAS_5.COL_12) = 'TEXT_LITERAL_10')\n\
+    \t\tOR (@PARAM_55 = 'TEXT_LITERAL_11' AND UPPER(ALIAS_5.COL_12) = 'TEXT_LITERAL_12')\n\t)\n\tAND (ALIAS_5.COL_25\
+    \ = @PARAM_50 OR @PARAM_50 = 'TEXT_LITERAL_13');\n\nEND;\n$function$;\n\n==============================================================================================================================\n\
+    -- SELECT ALIAS_5.COL_32, ALIAS_5.COL_29 FROM SCHEMA_1.TBL_1 AS ALIAS_5;\n-- SELECT ALIAS_7.COL_32\
+    \ from SCHEMA_1.TBL_8 AS ALIAS_7;   --- ON ALIAS_7.COL_32 = ALIAS_5.COL_32\n-- SELECT ALIAS_8.COL_29\
+    \ FROM SCHEMA_1.TBL_4 ALIAS_8 WHERE ALIAS_8.COL_21 = \n-- SELECT ALIAS_4.COL_21 FROM SCHEMA_1.TBL_4\
+    \ ALIAS_4 WHERE ALIAS_4.COL_29 = 1\n-- SELECT ALIAS_8.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_8 WHERE ALIAS_8.COL_21\
+    \ = 1;\n\nSELECT  ALIAS_5.COL_15, ALIAS_5.COL_13, ALIAS_5.COL_47, ALIAS_5.COL_18, ALIAS_5.COL_19,\n\
+    \        ALIAS_5.COL_29, ALIAS_5.COL_35, ALIAS_5.COL_36,\n        CASE WHEN ALIAS_5.COL_12 = 'TEXT_LITERAL_2'\
+    \ OR ALIAS_5.COL_12 IS NULL\n             THEN ALIAS_5.COL_40 ELSE ALIAS_5.COL_12 END AS COL_40,\n\
+    \        ALIAS_5.COL_37, ALIAS_5.COL_39::TEXT, ALIAS_5.COL_38::TEXT,\n        ALIAS_5.COL_42, (ALIAS_5.COL_41\
+    \ <> 0) AS COL_41,\n        ALIAS_5.COL_43, ALIAS_5.COL_32, ALIAS_6.COL_22, ALIAS_7.COL_20::TEXT,\n\
+    \        SCHEMA_1.sf_get_patient_info(ALIAS_5.COL_29, 8, 0)::TEXT AS COL_30,        ALIAS_5.COL_25::TEXT\
+    \ AS COL_25,\n        CASE WHEN 1 > 0   -- @PARAM_48 = 1\n             THEN (SELECT ALIAS_4.COL_21\
+    \ FROM SCHEMA_1.TBL_4 ALIAS_4 WHERE ALIAS_4.COL_29 = 1) -- @PARAM_48 = 1\n             ELSE NULL END\
+    \ AS COL_28, ALIAS_5.COL_34::TEXT\n    FROM SCHEMA_1.TBL_1 AS ALIAS_5\n    JOIN SCHEMA_1.TBL_2 AS\
+    \ ALIAS_6 ON ALIAS_5.COL_13 = ALIAS_6.COL_13\n    JOIN SCHEMA_1.TBL_8 AS ALIAS_7 ON ALIAS_7.COL_32\
+    \ = ALIAS_5.COL_32\n    JOIN SCHEMA_1.TBL_4 AS ALIAS_8 ON ALIAS_8.COL_29 = ALIAS_5.COL_29\n    JOIN\
+    \ SCHEMA_1.TBL_7 AS ALIAS_9 ON ALIAS_8.COL_44 = ALIAS_9.COL_44\n    WHERE ALIAS_5.COL_24 = 1\n   \
+    \   AND (\n          --(ALIAS_5.COL_29 = @PARAM_48 AND @PARAM_54 = 'TEXT_LITERAL_6')\n\t\t  (ALIAS_5.COL_29\
+    \ = 3) -- AND @PARAM_54 = 'TEXT_LITERAL_6'));\n\t      -- OR (@PARAM_54 = 'TEXT_LITERAL_7' AND ALIAS_5.COL_29\
+    \ IN (SELECT ALIAS_8.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_8 WHERE ALIAS_8.COL_21 = COL_28))\n\t\t  OR\
+    \ (ALIAS_5.COL_29 IN (SELECT ALIAS_8.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_8 WHERE ALIAS_8.COL_21 = 1))\
+    \  --COL_28 = 1\n          -- OR (@PARAM_48 = 0)\n      )\n      --AND (ALIAS_5.COL_32 = 4 AND 4 >\
+    \ 0)   -- @PARAM_49 = 4\n\t  -- AND (@PARAM_49 = 999 OR (ALIAS_5.COL_32 = @PARAM_49 AND @PARAM_49\
+    \ > 0))   \n\t  AND (ALIAS_5.COL_32 = 4 AND 4 > 0)\n      AND (\n          ((ALIAS_5.COL_43::COL_17\
+    \ >= 'TEXT_LITERAL_14' AND ALIAS_5.COL_43::COL_17 <= 'TEXT_LITERAL_15'))\n          -- OR @PARAM_53\
+    \ = 9\n      )\n      AND (\n          -- (UPPER(ALIAS_5.COL_40) = UPPER(@PARAM_55) AND (ALIAS_5.COL_12\
+    \ = 'TEXT_LITERAL_2' OR ALIAS_5.COL_12 IS NULL))\n\t\t  (UPPER(ALIAS_5.COL_40) = UPPER('TEXT_LITERAL_9')\
+    \ AND (ALIAS_5.COL_12 = 'TEXT_LITERAL_2' OR ALIAS_5.COL_12 IS NULL))\n\t\t  OR UPPER(ALIAS_5.COL_12)\
+    \ = 'TEXT_LITERAL_10'\n\t\t  OR UPPER(ALIAS_5.COL_12) = 'TEXT_LITERAL_12'\n          -- OR (@PARAM_55\
+    \ = 'TEXT_LITERAL_8')\n          -- OR (@PARAM_55 = 'TEXT_LITERAL_9' AND UPPER(ALIAS_5.COL_12) = 'TEXT_LITERAL_10')\n\
+    \          -- OR (@PARAM_55 = 'TEXT_LITERAL_11' AND UPPER(ALIAS_5.COL_12) = 'TEXT_LITERAL_12')\n \
+    \     )\t  \n      AND ALIAS_5.COL_25 = 'TEXT_LITERAL_16';\n\t  -- (ALIAS_5.COL_25 = @PARAM_50 OR\
+    \ @PARAM_50 = 'TEXT_LITERAL_13');  -- @PARAM_50 = 'TEXT_LITERAL_16'\n\n-- @PARAM_48, @PARAM_54 = 0,1,\
+    \ @PARAM_49, @PARAM_51, @PARAM_52, @PARAM_55, @PARAM_50, @PARAM_53\n-- @PARAM_49 = 4; @PARAM_50 =\
+    \ 'TEXT_LITERAL_16'; @PARAM_48 = 1; @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9;\
+    \ @PARAM_51 = 'TEXT_LITERAL_17'; @PARAM_52 = 'TEXT_LITERAL_15';\n-- @PARAM_49 = 5; @PARAM_50 = 'TEXT_LITERAL_18';\
+    \ @PARAM_48 = 2; @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9; @PARAM_51 = 'TEXT_LITERAL_19';\
+    \ @PARAM_52 = 'TEXT_LITERAL_20';\n-- @PARAM_49 = 6; @PARAM_50 = 'TEXT_LITERAL_21'; @PARAM_48 = 3;\
+    \ @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9; @PARAM_51 = 'TEXT_LITERAL_22'; @PARAM_52\
+    \ = 'TEXT_LITERAL_23';\n\n(1,0,4,'TEXT_LITERAL_17','TEXT_LITERAL_15','TEXT_LITERAL_11','TEXT_LITERAL_16',9)\n\
+    (2,1,5,'TEXT_LITERAL_19','TEXT_LITERAL_20','TEXT_LITERAL_9','TEXT_LITERAL_18',9)\n(3,0,6,'TEXT_LITERAL_22','TEXT_LITERAL_23','TEXT_LITERAL_8','TEXT_LITERAL_21',9)\n\
+    \nINSERT INTO SCHEMA_1.TBL_1 (\n  COL_13, COL_29, COL_32, provider_id,\n  COL_25, COL_34, COL_47,\
+    \ COL_18, COL_19,\n  COL_35, COL_36, COL_24, COL_43,\n  COL_37, resp_amount, resp_currency, COL_38,\n\
+    \  COL_39, resp_reference, COL_40, resp_signature,\n  COL_41, COL_42, ndp_est_fee, ndp_keep_fee, ndp_proc_fee,\n\
+    \  COL_12, responsible_id, resp_uri, resp_expires_in,\n  resp_merchant_id, resp_merchant_raw_id, resp_charge_id,\
+    \ ndp_paym_prov_id\n) values\n(\n  48257, 3, 6, 1,\n  'TEXT_LITERAL_21', 'TEXT_LITERAL_24', 5000.00,\
+    \ 1000.00, 20.00,\n  4000.00, 2000.00, 1, 'TEXT_LITERAL_25',\n  'TEXT_LITERAL_26', 5000.00, 'TEXT_LITERAL_27',\
+    \ 'TEXT_LITERAL_28',\n  'TEXT_LITERAL_29', 'TEXT_LITERAL_30', 'TEXT_LITERAL_8', 'TEXT_LITERAL_31',\n\
+    \  0, 'TEXT_LITERAL_32', 250.00, 100.00, 50.00,\n  NULL, 2, 'TEXT_LITERAL_33', 3600,\n  'TEXT_LITERAL_34',\
+    \ 'TEXT_LITERAL_35', 'TEXT_LITERAL_36', 1\n),\n(\n  48256, 2, 5, 2,\n  'TEXT_LITERAL_18', 'TEXT_LITERAL_37',\
+    \ 7500.00, 1500.00, 20.00,\n  6000.00, 3000.00, 1, 'TEXT_LITERAL_38',\n  'TEXT_LITERAL_39', 7500.00,\
+    \ 'TEXT_LITERAL_40', 'TEXT_LITERAL_41',\n  'TEXT_LITERAL_42', 'TEXT_LITERAL_43', 'TEXT_LITERAL_9',\
+    \ 'TEXT_LITERAL_44',\n  1, 'TEXT_LITERAL_45', 300.00, 120.00, 60.00,\n  'TEXT_LITERAL_10', 3, 'TEXT_LITERAL_46',\
+    \ 7200,\n  'TEXT_LITERAL_47', 'TEXT_LITERAL_48', 'TEXT_LITERAL_49', 2\n),\n(\n  48255, 1, 4, 1,\n\
+    \  'TEXT_LITERAL_16', 'TEXT_LITERAL_50', 10000.00, 2000.00, 20.00,\n  8000.00, 4000.00, 1, 'TEXT_LITERAL_51',\n\
+    \  'TEXT_LITERAL_52', 10000.00, 'TEXT_LITERAL_53', 'TEXT_LITERAL_54',\n  'TEXT_LITERAL_55', 'TEXT_LITERAL_56',\
+    \ 'TEXT_LITERAL_11', 'TEXT_LITERAL_57',\n  0, 'TEXT_LITERAL_58', 400.00, 150.00, 75.00,\n  'TEXT_LITERAL_12',\
+    \ 4, 'TEXT_LITERAL_59', 1800,\n  'TEXT_LITERAL_60', 'TEXT_LITERAL_61', 'TEXT_LITERAL_62', 1\n);"
+corrections:
+- before_masked: "\tIN @PARAM_48 INTEGER\n\t, IN @PARAM_54 TEXT\n\t, IN @PARAM_49 INTEGER\n\t, IN @PARAM_51\
+    \ COL_17\n\t, IN @PARAM_52 COL_17\n\t, IN @PARAM_55 TEXT\n\t, IN @PARAM_50 TEXT\n\t, IN @PARAM_53\
+    \ INTEGER\n"
+  after_masked: "\tIN @PARAM_48 INTEGER,\n\tIN @PARAM_54 TEXT,\n\tIN @PARAM_49 INTEGER,\n\tIN @PARAM_51\
+    \ COL_17,\n\tIN @PARAM_52 COL_17,\n\tIN @PARAM_55 TEXT,\n\tIN @PARAM_50 TEXT,\n\tIN @PARAM_53 INTEGER\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tCOL_15 INTEGER\n\t, COL_13 INTEGER\n\t, COL_47 NUMERIC(20, 2)\n\t, COL_18 NUMERIC(20,\
+    \ 2)\n\t, COL_19 NUMERIC(20, 2)\n\t, COL_29 INTEGER\n\t, COL_35 NUMERIC(20, 2)\n\t, COL_36 NUMERIC(20,\
+    \ 2)\n\t, COL_40 TEXT\n\t, COL_37 NVARCHAR(25)\n\t, COL_39 TEXT\n\t, COL_38 TEXT\n\t, COL_42 TIMESTAMP\n\
+    \t, COL_41 BOOLEAN\n\t, COL_43 TIMESTAMP\n\t, COL_32 INTEGER\n\t, COL_22 INTEGER\n\t, COL_16 COL_17\n\
+    \t, COL_27 NUMERIC(19, 2)\n\t, VAR_58 INTEGER\n\t, COL_20 TEXT\n\t, COL_30 TEXT\n\t, COL_25 TEXT\n\
+    \t, COL_28 INTEGER\n\t, COL_34 TEXT\n"
+  after_masked: "\tCOL_15 INTEGER,\n\tCOL_13 INTEGER,\n\tCOL_47 NUMERIC(20,2),\n\tCOL_18 NUMERIC(20,2),\n\
+    \tCOL_19 NUMERIC(20,2),\n\tCOL_29 INTEGER,\n\tCOL_35 NUMERIC(20,2),\n\tCOL_36 NUMERIC(20,2),\n\tCOL_40\
+    \ TEXT,\n\tCOL_37 VARCHAR(25),\n\tCOL_39 TEXT,\n\tCOL_38 TEXT,\n\tCOL_42 TIMESTAMP,\n\tCOL_41 BOOLEAN,\n\
+    \tCOL_43 TIMESTAMP,\n\tCOL_32 SMALLINT,\n\tCOL_22 INTEGER,\n\tCOL_16 COL_17,\n\tCOL_27 NUMERIC(19,2),\n\
+    \tCOL_33 INTEGER,\n\tCOL_20 TEXT,\n\tCOL_30 TEXT,\n\tCOL_25 TEXT,\n\tCOL_28 INTEGER,\n\tCOL_34 TEXT\n"
+  reuse: exact_or_renderer_review
+- before_masked: 'LANGUAGE sql
+
+    '
+  after_masked: 'LANGUAGE plpgsql
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: 'VAR_58 INTEGER;
+
+    @VAR_56 INTEGER;
+
+    @VAR_57 TEXT;
+
+    '
+  after_masked: "\t@VAR_56 INTEGER;\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tSELECT\n\tSCHEMA_1.\"sf_get_param_value\"('TEXT_LITERAL_1',\n\t0)\n\tINTO\n\t@VAR_57\n\
+    \tFROM SCHEMA_1.TBL_3 AS ALIAS_1;\n"
+  after_masked: 'END;
+
+    $function$;
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: "\t@VAR_56 := CAST(@VAR_57 AS INTEGER);\n"
+  after_masked: "==============================================================================================================================\n\
+    -- SELECT ALIAS_1.COL_32, ALIAS_1.COL_29 FROM SCHEMA_1.TBL_1 AS ALIAS_1;\n-- SELECT ALIAS_2.COL_32\
+    \ from SCHEMA_1.TBL_8 AS ALIAS_2;   --- ON ALIAS_2.COL_32 = ALIAS_1.COL_32\n-- SELECT ALIAS_3.COL_29\
+    \ FROM SCHEMA_1.TBL_4 ALIAS_3 WHERE ALIAS_3.COL_21 = \n-- SELECT ALIAS_4.COL_21 FROM SCHEMA_1.TBL_4\
+    \ ALIAS_4 WHERE ALIAS_4.COL_29 = 1\n-- SELECT ALIAS_3.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_3 WHERE ALIAS_3.COL_21\
+    \ = 1;\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tRETURN QUERY\n\tSELECT\n\t\tALIAS_6.COL_15\n\t\t, ALIAS_6.COL_13\n\t\t, ALIAS_6.COL_47\n\
+    \t\t, ALIAS_6.COL_18\n\t\t, ALIAS_6.COL_19\n\t\t, ALIAS_6.COL_29\n\t\t, ALIAS_6.COL_35\n\t\t, ALIAS_6.COL_36\n\
+    \t\t, (CASE\n\t\tWHEN ALIAS_6.COL_12 = 'TEXT_LITERAL_2'\n\t\tOR ALIAS_6.COL_12 IS NULL THEN ALIAS_6.COL_40\n\
+    \t\tELSE ALIAS_6.COL_12\n\t\tEND CASE)::TEXT AS COL_40\n\t\t, ALIAS_6.COL_37\n\t\t, ALIAS_6.COL_39::TEXT\n\
+    \t\t, ALIAS_6.COL_38::TEXT\n\t\t, ALIAS_6.COL_42\n\t\t, ALIAS_6.COL_41\n\t\t, ALIAS_6.COL_43\n\t\t\
+    , ALIAS_6.COL_32\n\t\t, ALIAS_7.COL_22\n\t\t, (\n\t\tSELECT\n\t\tALIAS_1.COL_17\n\t\tFROM SCHEMA_1.TBL_9\
+    \ AS ALIAS_1\n\t\tWHERE\n\t\tVAR_58 = ALIAS_1.COL_45\n\t\t) AS COL_16,\n\t\t(\n\t\tSELECT\n\t\tSUM(ALIAS_2.COL_11)\n\
+    \t\tFROM SCHEMA_1.TBL_5 AS ALIAS_2\n\t\tJOIN SCHEMA_1.TBL_6 AS ALIAS_3 ON ALIAS_2.COL_31 = ALIAS_3.COL_23\n\
+    \t\tWHERE\n\t\tALIAS_2.COL_29 IN (\n\t\tSELECT\n\t\tALIAS_4.COL_29\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_4\n\
+    \t\tWHERE\n\t\tALIAS_4.COL_21 = (\n\t\tSELECT\n\t\tALIAS_5.COL_21\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_5\n\
+    \t\tWHERE\n\t\tALIAS_5.COL_29 = ALIAS_6.COL_29) )\n\t\tAND (TRIM(ALIAS_3.COL_14) = CONVERT(TEXT, ALIAS_7.COL_22)\n\
+    \t\tOR TRIM(ALIAS_3.COL_14) = ALIAS_6.COL_34)\n\t\tAND ALIAS_3.COL_26 = @VAR_56\n\t\tAND ALIAS_2.COL_46\
+    \ = VAR_58\n\t\t) AS COL_27,\n\t\t(\n\t\tSELECT ALIAS_1.COL_45\n\t\tFROM SCHEMA_1.TBL_5 AS ALIAS_2\n\
+    \t\tJOIN SCHEMA_1.TBL_6 AS ALIAS_3 ON ALIAS_2.COL_31 = ALIAS_3.COL_23\n\t\tJOIN SCHEMA_1.TBL_9 AS\
+    \ ALIAS_1 ON ALIAS_2.COL_46 = ALIAS_1.COL_45\n\t\tWHERE\n\t\tALIAS_2.COL_29 IN (\n\t\tSELECT\n\t\t\
+    ALIAS_4.COL_29\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_4\n\t\tWHERE\n\t\tALIAS_4.COL_21 = (\n\t\tSELECT\n\t\
+    \tALIAS_5.COL_21\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_5\n\t\tWHERE\n\t\tALIAS_5.COL_29 = ALIAS_6.COL_29)\
+    \ )\n\t\tAND (TRIM(ALIAS_3.COL_14) = CONVERT(TEXT, ALIAS_7.COL_22)\n\t\tOR TRIM(ALIAS_3.COL_14) =\
+    \ ALIAS_6.COL_34)\n\t\tAND ALIAS_3.COL_26 = @VAR_56\n\t\tORDER BY\n\t\tALIAS_1.COL_17,\n\t\tALIAS_1.COL_45\
+    \ DESC\n\t\tLIMIT 1) AS VAR_58,\n\t\tALIAS_8.COL_20::TEXT,\n\t\t((\n\t\tSELECT\n\t\tSCHEMA_1.\"sf_get_patient_info\"\
+    (ALIAS_6.COL_29,\n\t\t8,\n\t\t0)))::TEXT AS COL_30\n\t\t, ALIAS_6.COL_25::TEXT AS COL_25\n\t\t, (\
+    \ CASE\n\t\tWHEN @PARAM_48 > 0\n\t\tTHEN\n\t\t(\n\t\tSELECT\n\t\tALIAS_5.COL_21\n\t\tFROM SCHEMA_1.TBL_4\
+    \ ALIAS_5\n\t\tWHERE\n\t\tALIAS_5.COL_29 = @PARAM_48)\n\t\tELSE NULL\n\t\tEND ) AS COL_28,\n\t\tALIAS_6.COL_34::TEXT\n\
+    \tFROM SCHEMA_1.TBL_1 AS ALIAS_6\n\tJOIN SCHEMA_1.TBL_2 AS ALIAS_7\n\t\tON ALIAS_6.COL_13 = ALIAS_7.COL_13\n\
+    \tJOIN SCHEMA_1.TBL_8 AS ALIAS_8\n\t\tON ALIAS_8.COL_32 = ALIAS_6.COL_32\n\tJOIN SCHEMA_1.TBL_4 AS\
+    \ ALIAS_4\n\t\tON ALIAS_4.COL_29 = ALIAS_6.COL_29\n\tJOIN SCHEMA_1.TBL_7 AS ALIAS_9\n\t\tON ALIAS_4.COL_44\
+    \ = ALIAS_9.COL_44\n\tWHERE\n\tALIAS_6.COL_24 = 1\n\t\tAND ( ( ALIAS_6.COL_29 = @PARAM_48\n\t\t\t\
+    AND @PARAM_54 = 'TEXT_LITERAL_6' )\n\t\t\tOR\n\t\t\t( @PARAM_54 = 'TEXT_LITERAL_7'\n\t\t\tAND ALIAS_6.COL_29\
+    \ IN (\n\t\t\tSELECT\n\t\t\tALIAS_4.COL_29\n\t\t\tFROM SCHEMA_1.TBL_4 ALIAS_4\n\t\t\tWHERE\n\t\t\t\
+    ALIAS_4.COL_21 = COL_28 ) )\n\t\t\tOR\n\t\t\t( @PARAM_48 = 0 ) )\n\t\tAND ( @PARAM_49 = 999\n\t\t\t\
+    OR ( ALIAS_6.COL_32 = @PARAM_49\n\t\t\tAND @PARAM_49 > 0) )\n\t\tAND ( (SCHEMA_1.COL_17(ALIAS_6.COL_43)\
+    \ >= @PARAM_51\n\t\t\tAND SCHEMA_1.COL_17(ALIAS_6.COL_43) <= @PARAM_52 )\n\t\t\tOR @PARAM_53 = 9)\n\
+    \t\tAND (\n\t\t\t(UPPER(ALIAS_6.COL_40 ) = UPPER(@PARAM_55)\n\t\t\tAND (ALIAS_6.COL_12 = 'TEXT_LITERAL_2'\n\
+    \t\t\tOR ALIAS_6.COL_12 IS NULL))\n\t\t\tOR (@PARAM_55 = 'TEXT_LITERAL_8')\n\t\t\tOR (@PARAM_55 =\
+    \ 'TEXT_LITERAL_9'\n\t\t\tAND UPPER(ALIAS_6.COL_12 ) = 'TEXT_LITERAL_10')\n\t\t\tOR (@PARAM_55 = 'TEXT_LITERAL_11'\n\
+    \t\t\tAND UPPER(ALIAS_6.COL_12 ) = 'TEXT_LITERAL_12')\n\t\t\t)\n\t\tAND ( ALIAS_6.COL_25 = @PARAM_50\n\
+    \t\t\tOR @PARAM_50 = 'TEXT_LITERAL_13')\nEND;\n$function$;"
+  after_masked: "SELECT  ALIAS_2.COL_15, ALIAS_2.COL_13, ALIAS_2.COL_47, ALIAS_2.COL_18, ALIAS_2.COL_19,\n\
+    \        ALIAS_2.COL_29, ALIAS_2.COL_35, ALIAS_2.COL_36,\n        CASE WHEN ALIAS_2.COL_12 = 'TEXT_LITERAL_2'\
+    \ OR ALIAS_2.COL_12 IS NULL\n             THEN ALIAS_2.COL_40 ELSE ALIAS_2.COL_12 END AS COL_40,\n\
+    \        ALIAS_2.COL_37, ALIAS_2.COL_39::TEXT, ALIAS_2.COL_38::TEXT,\n        ALIAS_2.COL_42, (ALIAS_2.COL_41\
+    \ <> 0) AS COL_41,\n        ALIAS_2.COL_43, ALIAS_2.COL_32, ALIAS_3.COL_22, ALIAS_4.COL_20::TEXT,\n\
+    \        SCHEMA_1.sf_get_patient_info(ALIAS_2.COL_29, 8, 0)::TEXT AS COL_30,        ALIAS_2.COL_25::TEXT\
+    \ AS COL_25,\n        CASE WHEN 1 > 0   -- @PARAM_48 = 1\n             THEN (SELECT ALIAS_1.COL_21\
+    \ FROM SCHEMA_1.TBL_4 ALIAS_1 WHERE ALIAS_1.COL_29 = 1) -- @PARAM_48 = 1\n             ELSE NULL END\
+    \ AS COL_28, ALIAS_2.COL_34::TEXT\n    FROM SCHEMA_1.TBL_1 AS ALIAS_2\n    JOIN SCHEMA_1.TBL_2 AS\
+    \ ALIAS_3 ON ALIAS_2.COL_13 = ALIAS_3.COL_13\n    JOIN SCHEMA_1.TBL_8 AS ALIAS_4 ON ALIAS_4.COL_32\
+    \ = ALIAS_2.COL_32\n    JOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON ALIAS_5.COL_29 = ALIAS_2.COL_29\n    JOIN\
+    \ SCHEMA_1.TBL_7 AS ALIAS_6 ON ALIAS_5.COL_44 = ALIAS_6.COL_44\n    WHERE ALIAS_2.COL_24 = 1\n   \
+    \   AND (\n          --(ALIAS_2.COL_29 = @PARAM_48 AND @PARAM_54 = 'TEXT_LITERAL_6')\n\t\t  (ALIAS_2.COL_29\
+    \ = 3) -- AND @PARAM_54 = 'TEXT_LITERAL_6'));\n\t      -- OR (@PARAM_54 = 'TEXT_LITERAL_7' AND ALIAS_2.COL_29\
+    \ IN (SELECT ALIAS_5.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_5 WHERE ALIAS_5.COL_21 = COL_28))\n\t\t  OR\
+    \ (ALIAS_2.COL_29 IN (SELECT ALIAS_5.COL_29 FROM SCHEMA_1.TBL_4 ALIAS_5 WHERE ALIAS_5.COL_21 = 1))\
+    \  --COL_28 = 1\n          -- OR (@PARAM_48 = 0)\n      )\n      --AND (ALIAS_2.COL_32 = 4 AND 4 >\
+    \ 0)   -- @PARAM_49 = 4\n\t  -- AND (@PARAM_49 = 999 OR (ALIAS_2.COL_32 = @PARAM_49 AND @PARAM_49\
+    \ > 0))   \n\t  AND (ALIAS_2.COL_32 = 4 AND 4 > 0)\n      AND (\n          ((ALIAS_2.COL_43::COL_17\
+    \ >= 'TEXT_LITERAL_14' AND ALIAS_2.COL_43::COL_17 <= 'TEXT_LITERAL_15'))\n          -- OR @PARAM_53\
+    \ = 9\n      )\n      AND (\n          -- (UPPER(ALIAS_2.COL_40) = UPPER(@PARAM_55) AND (ALIAS_2.COL_12\
+    \ = 'TEXT_LITERAL_2' OR ALIAS_2.COL_12 IS NULL))\n\t\t  (UPPER(ALIAS_2.COL_40) = UPPER('TEXT_LITERAL_9')\
+    \ AND (ALIAS_2.COL_12 = 'TEXT_LITERAL_2' OR ALIAS_2.COL_12 IS NULL))\n\t\t  OR UPPER(ALIAS_2.COL_12)\
+    \ = 'TEXT_LITERAL_10'\n\t\t  OR UPPER(ALIAS_2.COL_12) = 'TEXT_LITERAL_12'\n          -- OR (@PARAM_55\
+    \ = 'TEXT_LITERAL_8')\n          -- OR (@PARAM_55 = 'TEXT_LITERAL_9' AND UPPER(ALIAS_2.COL_12) = 'TEXT_LITERAL_10')\n\
+    \          -- OR (@PARAM_55 = 'TEXT_LITERAL_11' AND UPPER(ALIAS_2.COL_12) = 'TEXT_LITERAL_12')\n \
+    \     )\t  \n      AND ALIAS_2.COL_25 = 'TEXT_LITERAL_16';\n\t  -- (ALIAS_2.COL_25 = @PARAM_50 OR\
+    \ @PARAM_50 = 'TEXT_LITERAL_13');  -- @PARAM_50 = 'TEXT_LITERAL_16'\n\n-- @PARAM_48, @PARAM_54 = 0,1,\
+    \ @PARAM_49, @PARAM_51, @PARAM_52, @PARAM_55, @PARAM_50, @PARAM_53\n-- @PARAM_49 = 4; @PARAM_50 =\
+    \ 'TEXT_LITERAL_16'; @PARAM_48 = 1; @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9;\
+    \ @PARAM_51 = 'TEXT_LITERAL_17'; @PARAM_52 = 'TEXT_LITERAL_15';\n-- @PARAM_49 = 5; @PARAM_50 = 'TEXT_LITERAL_18';\
+    \ @PARAM_48 = 2; @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9; @PARAM_51 = 'TEXT_LITERAL_19';\
+    \ @PARAM_52 = 'TEXT_LITERAL_20';\n-- @PARAM_49 = 6; @PARAM_50 = 'TEXT_LITERAL_21'; @PARAM_48 = 3;\
+    \ @PARAM_55 = 'TEXT_LITERAL_9'; @PARAM_54 = 0,1; @PARAM_53 = 9; @PARAM_51 = 'TEXT_LITERAL_22'; @PARAM_52\
+    \ = 'TEXT_LITERAL_23';\n\n(1,0,4,'TEXT_LITERAL_17','TEXT_LITERAL_15','TEXT_LITERAL_11','TEXT_LITERAL_16',9)\n\
+    (2,1,5,'TEXT_LITERAL_19','TEXT_LITERAL_20','TEXT_LITERAL_9','TEXT_LITERAL_18',9)\n(3,0,6,'TEXT_LITERAL_22','TEXT_LITERAL_23','TEXT_LITERAL_8','TEXT_LITERAL_21',9)\n\
+    \nINSERT INTO SCHEMA_1.TBL_1 (\n  COL_13, COL_29, COL_32, provider_id,\n  COL_25, COL_34, COL_47,\
+    \ COL_18, COL_19,\n  COL_35, COL_36, COL_24, COL_43,\n  COL_37, resp_amount, resp_currency, COL_38,\n\
+    \  COL_39, resp_reference, COL_40, resp_signature,\n  COL_41, COL_42, ndp_est_fee, ndp_keep_fee, ndp_proc_fee,\n\
+    \  COL_12, responsible_id, resp_uri, resp_expires_in,\n  resp_merchant_id, resp_merchant_raw_id, resp_charge_id,\
+    \ ndp_paym_prov_id\n) values\n(\n  48257, 3, 6, 1,\n  'TEXT_LITERAL_21', 'TEXT_LITERAL_24', 5000.00,\
+    \ 1000.00, 20.00,\n  4000.00, 2000.00, 1, 'TEXT_LITERAL_25',\n  'TEXT_LITERAL_26', 5000.00, 'TEXT_LITERAL_27',\
+    \ 'TEXT_LITERAL_28',\n  'TEXT_LITERAL_29', 'TEXT_LITERAL_30', 'TEXT_LITERAL_8', 'TEXT_LITERAL_31',\n\
+    \  0, 'TEXT_LITERAL_32', 250.00, 100.00, 50.00,\n  NULL, 2, 'TEXT_LITERAL_33', 3600,\n  'TEXT_LITERAL_34',\
+    \ 'TEXT_LITERAL_35', 'TEXT_LITERAL_36', 1\n),\n(\n  48256, 2, 5, 2,\n  'TEXT_LITERAL_18', 'TEXT_LITERAL_37',\
+    \ 7500.00, 1500.00, 20.00,\n  6000.00, 3000.00, 1, 'TEXT_LITERAL_38',\n  'TEXT_LITERAL_39', 7500.00,\
+    \ 'TEXT_LITERAL_40', 'TEXT_LITERAL_41',\n  'TEXT_LITERAL_42', 'TEXT_LITERAL_43', 'TEXT_LITERAL_9',\
+    \ 'TEXT_LITERAL_44',\n  1, 'TEXT_LITERAL_45', 300.00, 120.00, 60.00,\n  'TEXT_LITERAL_10', 3, 'TEXT_LITERAL_46',\
+    \ 7200,\n  'TEXT_LITERAL_47', 'TEXT_LITERAL_48', 'TEXT_LITERAL_49', 2\n),\n(\n  48255, 1, 4, 1,\n\
+    \  'TEXT_LITERAL_16', 'TEXT_LITERAL_50', 10000.00, 2000.00, 20.00,\n  8000.00, 4000.00, 1, 'TEXT_LITERAL_51',\n\
+    \  'TEXT_LITERAL_52', 10000.00, 'TEXT_LITERAL_53', 'TEXT_LITERAL_54',\n  'TEXT_LITERAL_55', 'TEXT_LITERAL_56',\
+    \ 'TEXT_LITERAL_11', 'TEXT_LITERAL_57',\n  0, 'TEXT_LITERAL_58', 400.00, 150.00, 75.00,\n  'TEXT_LITERAL_12',\
+    \ 4, 'TEXT_LITERAL_59', 1800,\n  'TEXT_LITERAL_60', 'TEXT_LITERAL_61', 'TEXT_LITERAL_62', 1\n);"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference
