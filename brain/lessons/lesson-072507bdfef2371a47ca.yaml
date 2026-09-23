@@ -1,0 +1,136 @@
+lesson_id: 072507bdfef2371a47ca
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- ELSE
+- LIST
+- NESTED_SELECT
+- RESULT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_4( \n\tin @PARAM_20 char(1) default 'TEXT_LITERAL_1',\n\
+    \tin @PARAM_19 char(1) default 'TEXT_LITERAL_2',\n\tin @PARAM_21 char(1) default 'TEXT_LITERAL_2'\n\
+    )\nresult(\n\tCOL_13 varchar(25),\n\tCOL_16 char(100),\n\tCOL_15 INTEGER /* WAS SMALL */,\n\tCOL_14\
+    \ INTEGER /* WAS SMALL */,\n\tCOL_18 char(1),\n\tCOL_7 char(1),\n\tCOL_6 INTEGER /* WAS SMALL */,\n\
+    \tCOL_17 tinyint,\n\tCOL_12 char(100),\n\tCOL_8 INTEGER /* WAS SMALL */\n)\nbegin\n    //******************************************************\n\
+    \    // Created:  21.06.2021 By: DiS\n    // SIR:      #27883\n    // What:\t TBL_2 list to select\
+    \ one for schedule\n    // Prepared: 06.08.2021 By Gritsenko\n    // SIR: #22336 File : WEBR3_001.sql\n\
+    \    //******************************************************\n    // Modified: 10.08.2021 By: DiS\n\
+    \    // SIR:      #27883\n    // What: \t COL_8 added into TBL_3\n    // Prepared: 24.08.2021 By Gritsenko\n\
+    \    // SIR: #22336 File : WEBR3_004.sql\n    // ******************************************************\n\
+    \    // Modified:\t27.04.2022\t\tBy: Gritsenko\t\n    // What : compute report name\n    // SIR: \t\
+    29868#note-24 \n    // Prepared: 28.04.2022 By Gritsenko\n    // SIR: #22336 File : WEBR3_055.sql\n\
+    \    // ******************************************************\n    DECLARE @VAR_22 int;\n\nSET\n\
+    @VAR_22 = VAR_24;\n--\n\tSELECT\tTBL_2.COL_13,   \n\t\t\t(case\n    TBL_2.COL_13\n\t\t\t\twhen 'TEXT_LITERAL_3'\
+    \ then (CASE\n        WHEN VAR_23 = 1 THEN 'TEXT_LITERAL_4'\n        ELSE 'TEXT_LITERAL_5'\n    END)\n\
+    \    when 'TEXT_LITERAL_6' then (CASE\n        WHEN VAR_23 = 1 THEN 'TEXT_LITERAL_7'\n        ELSE\
+    \ 'TEXT_LITERAL_8'\n    END)\n    else w3_get_report_name(COL_13)\nend) as COL_16,\n\t\t\tTBL_2.COL_15,\n\
+    \t\t\tTBL_2.COL_14,\n\t\t\tTBL_2.COL_18,\n\t\t\tTBL_2.COL_7,  \n\t\t\tTBL_1.COL_6, \n\t\t\tTBL_2.COL_17,\n\
+    \t\t\tw3_get_report_name(COL_13) as COL_12,\n            SCHEMA_1.wa_get_access( @VAR_22, \n     \
+    \                           0, \n                                string('TEXT_LITERAL_9', TBL_2.COL_11,\
+    \ 'TEXT_LITERAL_10', TBL_2.COL_13), \n                                'TEXT_LITERAL_11') \n      \
+    \      as COL_8\nFROM\nSCHEMA_1.TBL_2,\nSCHEMA_1.TBL_1\nWHERE\nstring('TEXT_LITERAL_9', TBL_2.COL_11,\
+    \ 'TEXT_LITERAL_10', TBL_2.COL_13) = TBL_1.COL_5\nand TBL_2.COL_9 = 'TEXT_LITERAL_12'\nand TBL_2.COL_10\
+    \ = 'TEXT_LITERAL_12'\nand (@PARAM_20 <> 'TEXT_LITERAL_1'\n    or COL_13 <> 'TEXT_LITERAL_13')\nand\
+    \ (LEN(@PARAM_19) > 0\n    or COL_13 <> 'TEXT_LITERAL_6')\nand (LEN(@PARAM_21) > 0\n    or COL_13\
+    \ <> 'TEXT_LITERAL_14')\nORDER BY\nCOL_16\n;\nend;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_4(\n\tIN @PARAM_20 TEXT DEFAULT 'TEXT_LITERAL_1'\n\
+    \t, IN @PARAM_19 TEXT DEFAULT 'TEXT_LITERAL_2'\n\t, IN @PARAM_21 TEXT DEFAULT 'TEXT_LITERAL_2'\n)\n\
+    RETURNS TABLE (\n\tCOL_13 TEXT\n\t, COL_16 TEXT\n\t, COL_15 INTEGER\n\t, COL_14 INTEGER\n\t, COL_18\
+    \ TEXT\n\t, COL_7 TEXT\n\t, COL_6 INTEGER\n\t, COL_17 SMALLINT\n\t, COL_12 TEXT\n\t, COL_8 INTEGER\n\
+    )\nLANGUAGE sql\nAS $function$\nDECLARE\n@VAR_22 INTEGER;\nBEGIN\n\n\t@VAR_22 := SCHEMA_1.get_int_var('TEXT_LITERAL_15');\n\
+    \n\tRETURN QUERY\n\tSELECT\n\t\tALIAS_1.COL_13::TEXT\n\t\t, ((CASE\n\t\tALIAS_1.COL_13\n\t\tWHEN 'TEXT_LITERAL_3'\
+    \ THEN (CASE\n\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_4'\n\t\tELSE\
+    \ 'TEXT_LITERAL_5'\n\t\tEND)\n\t\tWHEN 'TEXT_LITERAL_6' THEN (CASE\n\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16')\
+    \ = 1 THEN 'TEXT_LITERAL_7'\n\t\tELSE 'TEXT_LITERAL_8'\n\t\tEND)\n\t\tELSE SCHEMA_1.w3_get_report_name(ALIAS_1.COL_13)\n\
+    \t\tEND))::TEXT AS COL_16\n\t\t, ALIAS_1.COL_15::INTEGER\n\t\t, ALIAS_1.COL_14::INTEGER\n\t\t, ALIAS_1.COL_18::TEXT\n\
+    \t\t, ALIAS_1.COL_7::TEXT\n\t\t, ALIAS_2.COL_6::INTEGER\n\t\t, ALIAS_1.COL_17\n\t\t, (SCHEMA_1.w3_get_report_name(ALIAS_1.COL_13))::TEXT\
+    \ AS COL_12\n\t\t, SCHEMA_1.wa_get_access( @VAR_22,\n\t\t0,\n\t\tCONCAT('TEXT_LITERAL_9', ALIAS_1.COL_11,\
+    \ 'TEXT_LITERAL_10', ALIAS_1.COL_13),\n\t\t'TEXT_LITERAL_11')\n\t\tAS COL_8\n\tFROM SCHEMA_1.TBL_2\
+    \ AS ALIAS_1\n\tJOIN SCHEMA_1.TBL_1 AS ALIAS_2\n\t\tON CONCAT('TEXT_LITERAL_9', ALIAS_1.COL_11, 'TEXT_LITERAL_10',\
+    \ ALIAS_1.COL_13) = ALIAS_2.COL_5\n\tWHERE\n\tALIAS_1.COL_9 = 'TEXT_LITERAL_12'\n\t\tAND ALIAS_1.COL_10\
+    \ = 'TEXT_LITERAL_12'\n\t\tAND (@PARAM_20 <> 'TEXT_LITERAL_1'\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_13')\n\
+    \t\tAND (LENGTH(@PARAM_19) > 0\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_6')\n\t\tAND (LENGTH(@PARAM_21)\
+    \ > 0\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_14')\n\tORDER BY\n\tCOL_16\n\t;\nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_4(\n\tIN @PARAM_20 text DEFAULT 'TEXT_LITERAL_1'\n\
+    \t, IN @PARAM_19 text DEFAULT 'TEXT_LITERAL_2'\n\t, IN @PARAM_21 text DEFAULT 'TEXT_LITERAL_2'\n)\n\
+    RETURNS TABLE (\n\tCOL_13 text\n\t, COL_16 text\n\t, COL_15 integer\n\t, COL_14 integer\n\t, COL_18\
+    \ text\n\t, COL_7 text\n\t, COL_6 integer\n\t, COL_17 smallint\n\t, COL_12 text\n\t, COL_8 integer\n\
+    )\nLANGUAGE PLPGSQL\nAS $function$\nDECLARE\n@VAR_22 integer;\nBEGIN\n\n\t@VAR_22 := SCHEMA_1.get_int_var('TEXT_LITERAL_15');\n\
+    \n\tRETURN QUERY\n\tSELECT\n\t\t(ALIAS_1.COL_13)::text\n\t\t, ((CASE ALIAS_1.COL_13\n\t\t\tWHEN 'TEXT_LITERAL_3'\
+    \ THEN (\n\t\t\t\tCASE\n\t\t\t\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_17'\n\
+    \t\t\t\tELSE 'TEXT_LITERAL_5'\n\t\t\t\tEND)\n\t\t\tWHEN 'TEXT_LITERAL_6' THEN (\n\t\t\t\tCASE\n\t\t\
+    \t\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_18'\n\t\t\t\tELSE 'TEXT_LITERAL_8'\n\
+    \t\t\t\tEND)\n\t\t\tELSE SCHEMA_1.w3_get_report_name(ALIAS_1.COL_13)\n\t\tEND))::text AS COL_16\n\t\
+    \t, ALIAS_1.COL_15::integer\n\t\t, ALIAS_1.COL_14::integer\n\t\t, ALIAS_1.COL_18::text\n\t\t, ALIAS_1.COL_7::text\n\
+    \t\t, ALIAS_2.COL_6::integer\n\t\t, ALIAS_1.COL_17\n\t\t, (SCHEMA_1.w3_get_report_name(ALIAS_1.COL_13))::text\
+    \ AS COL_12\n\t\t, SCHEMA_1.wa_get_access( @VAR_22, 0, \n\t\t\tCONCAT('TEXT_LITERAL_9', ALIAS_1.COL_11,\
+    \ 'TEXT_LITERAL_10', ALIAS_1.COL_13),'TEXT_LITERAL_11') AS COL_8\n\tFROM SCHEMA_1.TBL_2 AS ALIAS_1\n\
+    \tJOIN SCHEMA_1.TBL_1 AS ALIAS_2\n\t\tON CONCAT('TEXT_LITERAL_9', ALIAS_1.COL_11, 'TEXT_LITERAL_10',\
+    \ ALIAS_1.COL_13) = ALIAS_2.COL_5\n\tWHERE\n\t\tALIAS_1.COL_9 = 'TEXT_LITERAL_12'\n\t\tAND ALIAS_1.COL_10\
+    \ = 'TEXT_LITERAL_12'\n\t\tAND (@PARAM_20 <> 'TEXT_LITERAL_1'\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_13')\n\
+    \t\tAND (LENGTH(@PARAM_19) > 0\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_6')\n\t\tAND (LENGTH(@PARAM_21)\
+    \ > 0\n\t\t\tOR ALIAS_1.COL_13 <> 'TEXT_LITERAL_14')\n\tORDER BY COL_16;\nEND;\n$function$;"
+corrections:
+- before_masked: "\tIN @PARAM_20 TEXT DEFAULT 'TEXT_LITERAL_1'\n\t, IN @PARAM_19 TEXT DEFAULT 'TEXT_LITERAL_2'\n\
+    \t, IN @PARAM_21 TEXT DEFAULT 'TEXT_LITERAL_2'\n"
+  after_masked: "\tIN @PARAM_20 text DEFAULT 'TEXT_LITERAL_1'\n\t, IN @PARAM_19 text DEFAULT 'TEXT_LITERAL_2'\n\
+    \t, IN @PARAM_21 text DEFAULT 'TEXT_LITERAL_2'\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tCOL_13 TEXT\n\t, COL_16 TEXT\n\t, COL_15 INTEGER\n\t, COL_14 INTEGER\n\t, COL_18 TEXT\n\
+    \t, COL_7 TEXT\n\t, COL_6 INTEGER\n\t, COL_17 SMALLINT\n\t, COL_12 TEXT\n\t, COL_8 INTEGER\n"
+  after_masked: "\tCOL_13 text\n\t, COL_16 text\n\t, COL_15 integer\n\t, COL_14 integer\n\t, COL_18 text\n\
+    \t, COL_7 text\n\t, COL_6 integer\n\t, COL_17 smallint\n\t, COL_12 text\n\t, COL_8 integer\n"
+  reuse: exact_or_renderer_review
+- before_masked: 'LANGUAGE sql
+
+    '
+  after_masked: 'LANGUAGE PLPGSQL
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: '@VAR_22 INTEGER;
+
+    '
+  after_masked: '@VAR_22 integer;
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: "\t\trep.COL_13::TEXT\n\t\t, ((CASE\n\t\trep.COL_13\n\t\tWHEN 'TEXT_LITERAL_3' THEN (CASE\n\
+    \t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_4'\n\t\tELSE 'TEXT_LITERAL_5'\n\
+    \t\tEND)\n\t\tWHEN 'TEXT_LITERAL_6' THEN (CASE\n\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') =\
+    \ 1 THEN 'TEXT_LITERAL_7'\n\t\tELSE 'TEXT_LITERAL_8'\n\t\tEND)\n\t\tELSE SCHEMA_1.w3_get_report_name(rep.COL_13)\n\
+    \t\tEND))::TEXT AS COL_16\n\t\t, rep.COL_15::INTEGER\n\t\t, rep.COL_14::INTEGER\n\t\t, rep.COL_18::TEXT\n\
+    \t\t, rep.COL_7::TEXT\n\t\t, act.COL_6::INTEGER\n"
+  after_masked: "\t\t(rep.COL_13)::text\n\t\t, ((CASE rep.COL_13\n\t\t\tWHEN 'TEXT_LITERAL_3' THEN (\n\
+    \t\t\t\tCASE\n\t\t\t\t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_17'\n\t\
+    \t\t\tELSE 'TEXT_LITERAL_5'\n\t\t\t\tEND)\n\t\t\tWHEN 'TEXT_LITERAL_6' THEN (\n\t\t\t\tCASE\n\t\t\t\
+    \t\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_16') = 1 THEN 'TEXT_LITERAL_18'\n\t\t\t\tELSE 'TEXT_LITERAL_8'\n\
+    \t\t\t\tEND)\n\t\t\tELSE SCHEMA_1.w3_get_report_name(rep.COL_13)\n\t\tEND))::text AS COL_16\n\t\t\
+    , rep.COL_15::integer\n\t\t, rep.COL_14::integer\n\t\t, rep.COL_18::text\n\t\t, rep.COL_7::text\n\t\
+    \t, act.COL_6::integer\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t\t, (SCHEMA_1.w3_get_report_name(rep.COL_13))::TEXT AS COL_12\n\t\t, SCHEMA_1.wa_get_access(\
+    \ @VAR_22,\n\t\t0,\n\t\tCONCAT('TEXT_LITERAL_9', rep.COL_11, 'TEXT_LITERAL_10', rep.COL_13),\n\t\t\
+    'TEXT_LITERAL_11')\n\t\tAS COL_8\n"
+  after_masked: "\t\t, (SCHEMA_1.w3_get_report_name(rep.COL_13))::text AS COL_12\n\t\t, SCHEMA_1.wa_get_access(\
+    \ @VAR_22, 0, \n\t\t\tCONCAT('TEXT_LITERAL_9', rep.COL_11, 'TEXT_LITERAL_10', rep.COL_13),'TEXT_LITERAL_11')\
+    \ AS COL_8\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\trep.COL_9 = 'TEXT_LITERAL_12'\n"
+  after_masked: "\t\trep.COL_9 = 'TEXT_LITERAL_12'\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tORDER BY\n\tCOL_16\n\t;\n"
+  after_masked: "\tORDER BY COL_16;\n"
+  reuse: exact_or_renderer_review
+- before_masked: '$$;
+
+    '
+  after_masked: $function$;
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

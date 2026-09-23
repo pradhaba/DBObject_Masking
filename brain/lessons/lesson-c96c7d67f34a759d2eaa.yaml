@@ -1,0 +1,114 @@
+lesson_id: c96c7d67f34a759d2eaa
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- ELSE
+- IF
+- ISNULL
+- JOIN
+- NESTED_SELECT
+- RESULT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_7\n( \n  @PARAM_24 int\n  ,\n@PARAM_25 varchar(10)\n\
+    \  ,\n@PARAM_26 tinyint\n)\n//*************************************************\n//SIR #26209 Created\
+    \ by Kozlovsky 02.08.2021\n// Prepared: 01.10.2021 By Gritsenko\n// SIR: #22336 File : WEBR3_008.sql\n\
+    //*************************************************\n RESULT\n( \n   COL_12 int\n   ,\nCOL_20 int\n\
+    \   ,\nCOL_18 varchar(10)\n   ,\nCOL_19 long varchar\n   ,\nCOL_22 int\n   ,\nCOL_21 int\n)\nBEGIN\n\
+    \    CASE\n        WHEN @PARAM_26 = 1 THEN\n  SELECT  \n    ISNULL(SCHEMA_2.COL_13,-1) as COL_12\n\
+    \    ,\n    PUT.COL_13 as COL_20\n    ,\n    PUT.COL_10 as COL_18\n    ,\n    'TEXT_LITERAL_1' ||\
+    \ PUT.COL_11 as COL_19\n    ,\n    (IF ISNULL(SCHEMA_2.COL_8,-1)<0 then 0\n    else 1\nend IF) as\
+    \ COL_22\n    ,\n    (IF ISNULL(SCHEMA_2.COL_9,-1)<0 then 0\n    else 1\nend IF) as COL_21\nFROM\n\
+    \    SCHEMA_1.TBL_4 PUT\nFULL JOIN  \n  (\n    SELECT\n        PU.COL_13\n    ,\n        PU.COL_8\
+    \ \n    ,\n        PU.COL_9,\n        PU.COL_23\n    FROM\n        SCHEMA_1.TBL_5 PU\n    JOIN SCHEMA_1.TBL_3\
+    \ PRT\n    ON\n        PRT.COL_16 = PU.COL_8\n    WHERE\n        PU.COL_14 = @PARAM_24\n        and\
+    \ PRT.COL_15 = @PARAM_25)X\n    ELSE\n  SELECT  \n    ISNULL(SCHEMA_2.COL_13,-1) as COL_12\n    ,\n\
+    \    PUT.COL_13 as COL_20\n    ,\n    PUT.COL_10 as COL_18\n    ,\n    'TEXT_LITERAL_1' || PUT.COL_11\
+    \ as COL_19\n    ,\n    (IF ISNULL(SCHEMA_2.COL_8,-1)<0 then 0\n    else 1\nend IF) as COL_22\n  \
+    \  ,\n    (IF ISNULL(SCHEMA_2.COL_9,-1)<0 then 0\n    else 1\nend IF) as COL_21\nFROM\n    SCHEMA_1.TBL_4\
+    \ PUT\nFULL JOIN  \n  (\n    SELECT\n        PU.COL_13\n    ,\n        PU.COL_8 \n    ,\n        PU.COL_9\n\
+    \    ,\n        PU.COL_23\n    FROM\n        SCHEMA_1.TBL_5 PU\n    JOIN SCHEMA_1.TBL_3 PRT\n    ON\n\
+    \        PRT.COL_16 = PU.COL_8\n    WHERE\n        COL_17 = @PARAM_24\n        and PRT.COL_15 = @PARAM_25)X\n\
+    END\nEND;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(\n\t@PARAM_24 INTEGER\n\t\n\t, @PARAM_25\
+    \ TEXT\n\t\n\t, @PARAM_26 SMALLINT\n)\nRETURNS TABLE (\n\tCOL_12 INTEGER\n\t\n\t, COL_20 INTEGER\n\
+    \t\n\t, COL_18 TEXT\n\t\n\t, COL_19 TEXT\n\t\n\t, COL_22 INTEGER\n\t\n\t, COL_21 INTEGER\n)\nLANGUAGE\
+    \ sql\nAS $function$\nBEGIN\n\tCASE\n\t\tWHEN @PARAM_26 = 1 THEN\n\tRETURN QUERY\n\tSELECT\n\t\tCOALESCE(SCHEMA_2.COL_13,-1)\
+    \ AS COL_12 /* MIGRATION REVIEW [COLUMN_METADATA_NOT_FOUND]: datatype unidentified; original expression\
+    \ preserved */\n\t\t, SCHEMA_4.COL_13 AS COL_20\n\t\t, SCHEMA_4.COL_10::TEXT AS COL_18\n\t\t, ('TEXT_LITERAL_1'\
+    \ || SCHEMA_4.COL_11)::TEXT AS COL_19\n\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_1,-1)<0 THEN 0 ELSE\
+    \ 1 END) AS COL_22\n\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_2,-1)<0 THEN 0 ELSE 1 END) AS COL_21\n\t\
+    FROM SCHEMA_1.TBL_4 ALIAS_1\n\t\tFULL JOIN\n\t\t(\n\t\t\tSELECT\n\t\t\tSCHEMA_3.COL_13\n\t\t\t\n\t\
+    \t\t, SCHEMA_3.TBL_1\n\t\t\t\n\t\t\t, SCHEMA_3.TBL_2\n\t\t\t, SCHEMA_3.TBL_6\n\t\t\tFROM SCHEMA_1.TBL_5\
+    \ ALIAS_2\n\t\t\tJOIN SCHEMA_1.TBL_3 ALIAS_3\n\t\t\tON\n\t\t\tALIAS_3.COL_16 = SCHEMA_3.TBL_1\n\t\t\
+    \tWHERE\n\t\t\tSCHEMA_3.COL_14 = @PARAM_24\n\t\t\tAND ALIAS_3.COL_15 = @PARAM_25)X;\n\t\tELSE\n\t\t\
+    RETURN QUERY\n\t\tSELECT\n\t\t\tCOALESCE(SCHEMA_2.COL_13,-1) AS COL_12\n\t\t\t, SCHEMA_4.COL_13 AS\
+    \ COL_20\n\t\t\t, SCHEMA_4.COL_10::TEXT AS COL_18\n\t\t\t, ('TEXT_LITERAL_1' || SCHEMA_4.COL_11)::TEXT\
+    \ AS COL_19\n\t\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_1,-1)<0 THEN 0 ELSE 1 END) AS COL_22\n\t\t\t\
+    , (CASE WHEN COALESCE(SCHEMA_2.TBL_2,-1)<0 THEN 0 ELSE 1 END) AS COL_21\n\t\tFROM SCHEMA_1.TBL_4 ALIAS_1\n\
+    \t\t\tFULL JOIN\n\t\t\t(\n\t\t\t\tSELECT\n\t\t\t\tSCHEMA_3.COL_13\n\t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_1\n\
+    \t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_2\n\t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_6\n\t\t\t\tFROM SCHEMA_1.TBL_5\
+    \ ALIAS_2\n\t\t\t\tJOIN SCHEMA_1.TBL_3 ALIAS_3\n\t\t\t\tON\n\t\t\t\tALIAS_3.COL_16 = SCHEMA_3.TBL_1\n\
+    \t\t\t\tWHERE\n\t\t\t\tSCHEMA_3.COL_17 = @PARAM_24\n\t\t\t\tAND ALIAS_3.COL_15 = @PARAM_25)X;\n\t\
+    END;\nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_7(\n    @PARAM_24 integer,\n    @PARAM_25\
+    \ text,\n    @PARAM_26 integer\n)\nRETURNS TABLE (\n    COL_12 integer,\n    COL_20 integer,\n   \
+    \ COL_18 text,\n    COL_19 text,\n    COL_22 integer,\n    COL_21 integer\n)\nLANGUAGE sql\nAS $function$\n\
+    /*************************************************\n02.08.2021 Kozlovsky, SIR#26209 \n01.09.2026 Bapuji\
+    \ Pradhan, SIR#44652\n*************************************************/\nWITH x AS (\n\tSELECT SCHEMA_4.COL_13,\
+    \ SCHEMA_4.TBL_1, SCHEMA_4.TBL_2, SCHEMA_4.TBL_6\n\tFROM SCHEMA_1.TBL_5 ALIAS_1\n\tJOIN SCHEMA_1.TBL_3\
+    \ ALIAS_2\n\t\tON SCHEMA_3.COL_16 = SCHEMA_4.TBL_1\n\tWHERE \n\t\t(CASE @PARAM_26\n\t\t\tWHEN 1 THEN\n\
+    \t\t\tSCHEMA_4.COL_14\n\t\tELSE\n\t\t\tSCHEMA_4.COL_17\n\t\tEND) = @PARAM_24\n\t\tAND SCHEMA_3.COL_15\
+    \ = @PARAM_25\n),\njoined AS (\n\tSELECT  \n\t\tCOALESCE(SCHEMA_2.COL_13, -1) AS COL_12,\n\t\tALIAS_3.COL_13::integer\
+    \ AS COL_20,\n\t\tALIAS_3.COL_10::text AS COL_18,\n\t\t'TEXT_LITERAL_1' || ALIAS_3.COL_11::text AS\
+    \ COL_19,\n\t\tCASE WHEN COALESCE(SCHEMA_2.TBL_1, -1) < 0 THEN 0 ELSE 1 END AS COL_22,\n\t\tCASE WHEN\
+    \ COALESCE(SCHEMA_2.TBL_2, -1) < 0 THEN 0 ELSE 1 END AS COL_21\n\tFROM SCHEMA_1.TBL_4 ALIAS_3\n\t\
+    FULL JOIN x\n\t\tON ALIAS_3.COL_13 = SCHEMA_2.TBL_2\n)\nSELECT j.COL_12, j.COL_20, j.COL_18, j.COL_19,\
+    \ j.COL_22, j.COL_21\nFROM joined as j;\n$function$;"
+corrections:
+- before_masked: "\t@PARAM_24 INTEGER\n\t\n\t, @PARAM_25 TEXT\n\t\n\t, @PARAM_26 SMALLINT\n"
+  after_masked: "    @PARAM_24 integer,\n    @PARAM_25 text,\n    @PARAM_26 integer\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tCOL_12 INTEGER\n\t\n\t, COL_20 INTEGER\n\t\n\t, COL_18 TEXT\n\t\n\t, COL_19 TEXT\n\
+    \t\n\t, COL_22 INTEGER\n\t\n\t, COL_21 INTEGER\n"
+  after_masked: "    COL_12 integer,\n    COL_20 integer,\n    COL_18 text,\n    COL_19 text,\n    COL_22\
+    \ integer,\n    COL_21 integer\n"
+  reuse: exact_or_renderer_review
+- before_masked: "BEGIN\n\tCASE\n\t\tWHEN @PARAM_26 = 1 THEN\n\tRETURN QUERY\n\tSELECT\n\t\tCOALESCE(SCHEMA_2.COL_13,-1)\
+    \ AS COL_12 /* MIGRATION REVIEW [COLUMN_METADATA_NOT_FOUND]: datatype unidentified; original expression\
+    \ preserved */\n\t\t, SCHEMA_4.COL_13 AS COL_20\n\t\t, SCHEMA_4.COL_10::TEXT AS COL_18\n\t\t, ('TEXT_LITERAL_1'\
+    \ || SCHEMA_4.COL_11)::TEXT AS COL_19\n\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_1,-1)<0 THEN 0 ELSE\
+    \ 1 END) AS COL_22\n\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_2,-1)<0 THEN 0 ELSE 1 END) AS COL_21\n\t\
+    FROM SCHEMA_1.TBL_4 ALIAS_1\n\t\tFULL JOIN\n\t\t(\n\t\t\tSELECT\n\t\t\tSCHEMA_3.COL_13\n\t\t\t\n\t\
+    \t\t, SCHEMA_3.TBL_1\n\t\t\t\n\t\t\t, SCHEMA_3.TBL_2\n\t\t\t, SCHEMA_3.TBL_6\n\t\t\tFROM SCHEMA_1.TBL_5\
+    \ ALIAS_2\n\t\t\tJOIN SCHEMA_1.TBL_3 ALIAS_3\n\t\t\tON\n\t\t\tALIAS_3.COL_16 = SCHEMA_3.TBL_1\n\t\t\
+    \tWHERE\n\t\t\tSCHEMA_3.COL_14 = @PARAM_24\n\t\t\tAND ALIAS_3.COL_15 = @PARAM_25)X;\n"
+  after_masked: "/*************************************************\n02.08.2021 Kozlovsky, SIR#26209 \n\
+    01.09.2026 Bapuji Pradhan, SIR#44652\n*************************************************/\nWITH x AS\
+    \ (\n\tSELECT SCHEMA_4.COL_13, SCHEMA_4.TBL_1, SCHEMA_4.TBL_2, SCHEMA_4.TBL_6\n\tFROM SCHEMA_1.TBL_5\
+    \ ALIAS_1\n\tJOIN SCHEMA_1.TBL_3 ALIAS_2\n\t\tON SCHEMA_3.COL_16 = SCHEMA_4.TBL_1\n\tWHERE \n\t\t\
+    (CASE @PARAM_26\n\t\t\tWHEN 1 THEN\n\t\t\tSCHEMA_4.COL_14\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t\tRETURN QUERY\n\t\tSELECT\n\t\t\tCOALESCE(SCHEMA_2.COL_13,-1) AS COL_12\n\t\t\t,\
+    \ SCHEMA_4.COL_13 AS COL_20\n\t\t\t, SCHEMA_4.COL_10::TEXT AS COL_18\n\t\t\t, ('TEXT_LITERAL_1' ||\
+    \ SCHEMA_4.COL_11)::TEXT AS COL_19\n\t\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_1,-1)<0 THEN 0 ELSE 1\
+    \ END) AS COL_22\n\t\t\t, (CASE WHEN COALESCE(SCHEMA_2.TBL_2,-1)<0 THEN 0 ELSE 1 END) AS COL_21\n\t\
+    \tFROM SCHEMA_1.TBL_4 ALIAS_1\n\t\t\tFULL JOIN\n\t\t\t(\n\t\t\t\tSELECT\n\t\t\t\tSCHEMA_3.COL_13\n\
+    \t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_1\n\t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_2\n\t\t\t\t\n\t\t\t\t, SCHEMA_3.TBL_6\n\
+    \t\t\t\tFROM SCHEMA_1.TBL_5 ALIAS_2\n\t\t\t\tJOIN SCHEMA_1.TBL_3 ALIAS_3\n\t\t\t\tON\n\t\t\t\tALIAS_3.COL_16\
+    \ = SCHEMA_3.TBL_1\n\t\t\t\tWHERE\n\t\t\t\tSCHEMA_3.COL_17 = @PARAM_24\n\t\t\t\tAND ALIAS_3.COL_15\
+    \ = @PARAM_25)X;\n\tEND;\nEND;\n$$;\n"
+  after_masked: "\t\t\tpu.COL_17\n\t\tEND) = @PARAM_24\n\t\tAND prt.COL_15 = @PARAM_25\n),\njoined AS\
+    \ (\n\tSELECT  \n\t\tCOALESCE(SCHEMA_2.COL_13, -1) AS COL_12,\n\t\tSCHEMA_4.COL_13::integer AS COL_20,\n\
+    \t\tSCHEMA_4.COL_10::text AS COL_18,\n\t\t'TEXT_LITERAL_1' || SCHEMA_4.COL_11::text AS COL_19,\n\t\
+    \tCASE WHEN COALESCE(SCHEMA_2.TBL_1, -1) < 0 THEN 0 ELSE 1 END AS COL_22,\n\t\tCASE WHEN COALESCE(SCHEMA_2.TBL_2,\
+    \ -1) < 0 THEN 0 ELSE 1 END AS COL_21\n\tFROM SCHEMA_1.TBL_4 ALIAS_1\n\tFULL JOIN x\n\t\tON SCHEMA_4.COL_13\
+    \ = SCHEMA_2.TBL_2\n)\nSELECT j.COL_12, j.COL_20, j.COL_18, j.COL_19, j.COL_22, j.COL_21\nFROM joined\
+    \ as j;\n$function$;"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

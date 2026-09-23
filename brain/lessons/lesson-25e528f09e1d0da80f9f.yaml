@@ -1,0 +1,45 @@
+lesson_id: 25e528f09e1d0da80f9f
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- FIRST
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_3(IN @PARAM_10 varchar(1), OUT @PARAM_11 varchar(100),\n\
+    OUT @PARAM_13 varchar(50),\nOUT @PARAM_12 INT)\nBEGIN\n    // ********************\n    // Created:\
+    \  29.08.2019\tBy: Migaenko \n    // Prepared: 23.09.2019\tBy: Schennikov \n    // SIR:      #22304\
+    \   File: WEB_175.sql\n    // ********************    \n    // Modified: 10.10.2019\tBy: Migaenko\n\
+    \    // SIR#      #23416\n    // Prepared: 15.10.2019  By: Gritsenko\n    // SIR:      #22336   FILE:\
+    \ WEB_182.sql\n    // ********************\n    \tSELECT\n    FIRST TBL_2.COL_9,\n    TBL_2.COL_8,\n\
+    \    TBL_2.COL_7\n\t\tINTO\n    @PARAM_11,\n    @PARAM_13,\n    @PARAM_12\nFROM\n    SCHEMA_1.TBL_2,\n\
+    \    SCHEMA_1.TBL_1\nWHERE\n    TBL_2.COL_6 = TBL_1.COL_6\n    AND TBL_1.COL_5 = 4\n    AND TBL_2.COL_4\
+    \ = @PARAM_10;\nEND;"
+  generated_masked: "CREATE OR REPLACE PROCEDURE SCHEMA_1.PROC_3(IN @PARAM_10 TEXT, OUT @PARAM_11 TEXT,\n\
+    OUT @PARAM_13 TEXT,\nOUT @PARAM_12 INTEGER)\nLANGUAGE PLPGSQL\nAS $$\nBEGIN\n\n\tSELECT ALIAS_1.COL_9,\n\
+    \tALIAS_1.COL_8,\n\tALIAS_1.COL_7\n\tINTO\n\t@PARAM_11,\n\t@PARAM_13,\n\t@PARAM_12\n\tFROM SCHEMA_1.TBL_2\
+    \ AS ALIAS_1\n\tJOIN SCHEMA_1.TBL_1 AS ALIAS_2 ON ALIAS_1.COL_6 = ALIAS_2.COL_6\n\tWHERE\n\tALIAS_2.COL_5\
+    \ = 4\n\tAND ALIAS_1.COL_4 = @PARAM_10\n\tLIMIT 1;\nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_3(\n\t@PARAM_10 text\n)\nRETURNS TABLE(\n\
+    \t@PARAM_11 text\n\t, @PARAM_13 text\n\t, @PARAM_12 integer\n)\nLANGUAGE SQL\nAS $function$\nSELECT\n\
+    \tALIAS_1.COL_9\n\t, ALIAS_1.COL_8\n\t, ALIAS_1.COL_7::integer\nFROM SCHEMA_1.TBL_2 AS ALIAS_1\nJOIN\
+    \ SCHEMA_1.TBL_1 AS ALIAS_2 ON ALIAS_1.COL_6 = ALIAS_2.COL_6\nWHERE\n\tALIAS_2.COL_5 = 4\n\tAND ALIAS_1.COL_4\
+    \ = @PARAM_10 limit 1;\n$function$;"
+corrections:
+- before_masked: "CREATE OR REPLACE PROCEDURE SCHEMA_1.PROC_3(IN @PARAM_10 TEXT, OUT @PARAM_11 TEXT,\n\
+    OUT @PARAM_13 TEXT,\nOUT @PARAM_12 INTEGER)\nLANGUAGE PLPGSQL\nAS $$\nBEGIN\n\n\tSELECT ALIAS_1.COL_9,\n\
+    \tALIAS_1.COL_8,\n\tALIAS_1.COL_7\n\tINTO\n\t@PARAM_11,\n\t@PARAM_13,\n\t@PARAM_12\n\tFROM SCHEMA_1.TBL_2\
+    \ AS ALIAS_1\n\tJOIN SCHEMA_1.TBL_1 AS ALIAS_2 ON ALIAS_1.COL_6 = ALIAS_2.COL_6\n\tWHERE\n"
+  after_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_3(\n\t@PARAM_10 text\n)\nRETURNS TABLE(\n\t\
+    @PARAM_11 text\n\t, @PARAM_13 text\n\t, @PARAM_12 integer\n)\nLANGUAGE SQL\nAS $function$\nSELECT\n\
+    \tALIAS_1.COL_9\n\t, ALIAS_1.COL_8\n\t, ALIAS_1.COL_7::integer\nFROM SCHEMA_1.TBL_2 AS ALIAS_1\nJOIN\
+    \ SCHEMA_1.TBL_1 AS ALIAS_2 ON ALIAS_1.COL_6 = ALIAS_2.COL_6\nWHERE\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tAND mat.COL_4 = @PARAM_10\n\tLIMIT 1;\nEND;\n$$;\n"
+  after_masked: "\tAND mat.COL_4 = @PARAM_10 limit 1;\n$function$;"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

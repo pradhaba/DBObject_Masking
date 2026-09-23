@@ -1,0 +1,306 @@
+lesson_id: 16de7f492864ec10bbdc
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- EXISTS
+- IFNULL
+- NESTED_SELECT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_9(IN @PARAM_31 integer)\n// ******************************************************\n\
+    // Created: 09.02.2022 By: Yuri Shchelkanov\n// SIR:     #29880\n// What:\tGet TBL_6 permitted TBL_1\n\
+    // Prepared: 24.03.2022 By Gritsenko\n// SIR: #22336 File : WEBR3_048.sql\n// ******************************************************\n\
+    // Modified: 13.07.2022 By Gritsenko\n// What:\tusing COL_13, COL_17 ,COL_19 instead of action_name,\
+    \ mode_name ,module_name\n// SIR #31004\n// Prepared: 12.07.2022 By Gritsenko\n// SIR: #22336 File\
+    \ : WEBR3_075.sql\n// ******************************************************\nBEGIN\n    SELECT\n\
+    \    TBL_1.COL_13 as \"action_name\",   \n         TBL_3.COL_17 as \"mode_name\",   \n         TBL_4.COL_19\
+    \ as \"module_name\",   \n         TBL_4.COL_21 as \"modules_order_num\",   \n         TBL_3.COL_21\
+    \ as \"modes_order_num\",   \n         TBL_1.COL_21 as \"actions_order_num\",   \n         TBL_6.COL_10,\
+    \   \n         TBL_6.COL_28,   \n         ifnull(TBL_5.COL_26, TBL_6.COL_29, TBL_5.COL_26 + 'TEXT_LITERAL_1'\
+    \ + TBL_5.COL_15) as COL_29,   \n         TBL_1.COL_14,\n    TBL_1.COL_11,\n         TBL_3.COL_16,\n\
+    \         TBL_4.COL_18\nFROM\n    SCHEMA_1.TBL_6,\n    SCHEMA_1.TBL_5,\n    SCHEMA_1.TBL_1,\n    SCHEMA_1.TBL_3,\n\
+    \         SCHEMA_1.TBL_4 /* 20.09.2002 Isaev */,\n    SCHEMA_1.TBL_2 /* Isaev */\nWHERE\n    ( TBL_6.COL_28\
+    \ = @PARAM_31 )\n    AND  \n         ( TBL_3.COL_18 = TBL_4.COL_18 )\n    AND\n         ( TBL_1.COL_16\
+    \ = TBL_3.COL_16 )\n    AND\n         ( TBL_6.COL_28 *= TBL_5.COL_24)\n    AND\n         ( TBL_6.COL_10\
+    \ is null )\n    AND\n    //( TBL_1.COL_30= 1 /*Pozdeev 30.03.2006*/ ) AND\n\t\t( sf_secure_get_action_visible(TBL_1.COL_11,\
+    \ TBL_1.COL_30) = 1 )\n    AND\n\t\t( TBL_1.COL_14 = 0\n        or (TBL_1.COL_14 = 1\n           \
+    \ AND\n\t\texists (\n            SELECT\n                *\n            FROM\n                SCHEMA_1.TBL_1\
+    \ \"actions2\"\n            WHERE\n                \"actions2\".COL_16 = TBL_1.COL_16\n          \
+    \      AND \"actions2\".COL_14 = 0\n                AND (\"actions2\".COL_25 in (0, 2)\n         \
+    \           or exists (\n                    SELECT\n                        *\n                 \
+    \   FROM\n                        SCHEMA_1.TBL_8,\n                        SCHEMA_1.TBL_7,\n     \
+    \                   SCHEMA_1.TBL_6 \"users2\"\n                    WHERE\n                       \
+    \ ( TBL_8.COL_12 = \"actions2\".COL_12 )\n                            AND ( \"users2\".COL_28 = TBL_8.COL_28\
+    \ )\n                                AND ( TBL_7.COL_27 = \"users2\".COL_28 )\n                  \
+    \                  and ( TBL_7.COL_28 = @PARAM_31 )\n                                        AND (\
+    \ \"users2\".COL_10 is null ) )\n                        or exists (\n                        SELECT\n\
+    \                            *\n                        FROM\n                            SCHEMA_1.TBL_8\n\
+    \                        WHERE\n                            ( TBL_6.COL_28 = TBL_8.COL_28 )\n    \
+    \                            AND ( TBL_8.COL_12 = \"actions2\".COL_12 ) )))) )\n    AND\t\n      \
+    \   ( TBL_1.COL_25 in (0, 2)\n        or exists (\n        SELECT\n            *\n        FROM\n \
+    \           TBL_8,\n            TBL_7,\n            TBL_6 \"users2\"\n        WHERE\n            (\
+    \ TBL_8.COL_12 = TBL_1.COL_12 )\n                AND ( \"users2\".COL_28 = TBL_8.COL_28 )\n      \
+    \              AND ( TBL_7.COL_27 = \"users2\".COL_28 )\n                        and ( TBL_7.COL_28\
+    \ = @PARAM_31 )\n                            AND ( \"users2\".COL_10 is null ) )\n            or exists\
+    \ (\n            SELECT\n                *\n            FROM\n                SCHEMA_1.TBL_8\n   \
+    \         WHERE\n                ( TBL_6.COL_28 = TBL_8.COL_28 )\n                    AND ( TBL_8.COL_12\
+    \ = TBL_1.COL_12 ) ) ) /* 20.09.2002 Isaev */\n    AND\n         ( TBL_2.COL_22 IS NULL\n        AND\n\
+    \           TBL_2.COL_20 = TBL_3.COL_16\n        AND\n           TBL_2.COL_23 = 'TEXT_LITERAL_2')\n\
+    \    // Isaev\nEND;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(IN @PARAM_31 INTEGER)\nRETURNS TABLE (\n\
+    \taction_name TEXT\n\t, mode_name TEXT\n\t, module_name TEXT\n\t, modules_order_num SMALLINT\n\t,\
+    \ modes_order_num SMALLINT\n\t, actions_order_num SMALLINT\n\t, COL_10 SMALLINT\n\t, COL_28 INTEGER\n\
+    \t, COL_29 TEXT\n\t, COL_14 SMALLINT\n\t, COL_11 TEXT\n\t, COL_16 SMALLINT\n\t, COL_18 SMALLINT\n\
+    )\nLANGUAGE SQL\nAS $$\nSELECT\nALIAS_3.COL_13::TEXT AS \"action_name\"\n, ALIAS_4.COL_17::TEXT AS\
+    \ \"mode_name\"\n, ALIAS_5.COL_19::TEXT AS \"module_name\"\n, ALIAS_5.COL_21 AS \"modules_order_num\"\
+    \n, ALIAS_4.COL_21 AS \"modes_order_num\"\n, ALIAS_3.COL_21 AS \"actions_order_num\"\n, ALIAS_1.COL_10\n\
+    , ALIAS_1.COL_28\n, (COALESCE(ALIAS_2.COL_26, ALIAS_1.COL_29, ALIAS_2.COL_26 + 'TEXT_LITERAL_1' +\
+    \ ALIAS_2.COL_15))::TEXT AS COL_29\n, ALIAS_3.COL_14\n, ALIAS_3.COL_11::TEXT\n, ALIAS_4.COL_16\n,\
+    \ ALIAS_5.COL_18\nFROM SCHEMA_1.TBL_6 AS ALIAS_1\nJOIN SCHEMA_1.TBL_5 AS ALIAS_2 ON ALIAS_1.COL_28\
+    \ *= ALIAS_2.COL_24\nCROSS JOIN SCHEMA_1.TBL_1 AS ALIAS_3\nJOIN SCHEMA_1.TBL_3 AS ALIAS_4 ON ALIAS_3.COL_16\
+    \ = ALIAS_4.COL_16\nJOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON ALIAS_4.COL_18 = ALIAS_5.COL_18\nJOIN SCHEMA_1.TBL_2\
+    \ AS ALIAS_6 ON ALIAS_6.COL_20 = ALIAS_4.COL_16\nWHERE\nALIAS_1.COL_28 = @PARAM_31\nAND ALIAS_1.COL_10\
+    \ IS NULL\nAND SCHEMA_1.sf_secure_get_action_visible(ALIAS_3.COL_11, ALIAS_3.COL_30) = 1\nAND ( ALIAS_3.COL_14\
+    \ = 0\nOR (ALIAS_3.COL_14 = 1\nAND\nEXISTS (\nSELECT\n*\nFROM SCHEMA_1.TBL_1 ALIAS_7\nWHERE\nALIAS_7.COL_16\
+    \ = ALIAS_3.COL_16\nAND ALIAS_7.COL_14 = 0\nAND (ALIAS_7.COL_25 IN (0, 2)\nOR EXISTS (\nSELECT\n*\n\
+    FROM SCHEMA_1.TBL_8 AS ALIAS_8\nCROSS JOIN SCHEMA_1.TBL_7 AS ALIAS_9\nJOIN SCHEMA_1.TBL_6 ALIAS_10\
+    \ ON ALIAS_10.COL_28 = ALIAS_8.COL_28\nWHERE\nALIAS_8.COL_12 = ALIAS_7.COL_12\nAND ALIAS_9.COL_27\
+    \ = ALIAS_10.COL_28\nAND ALIAS_9.COL_28 = @PARAM_31\nAND ( ALIAS_10.COL_10 IS NULL ) )\nOR EXISTS\
+    \ (\nSELECT\n*\nFROM SCHEMA_1.TBL_8 AS ALIAS_8\nWHERE\n( ALIAS_1.COL_28 = ALIAS_8.COL_28 )\nAND (\
+    \ ALIAS_8.COL_12 = ALIAS_7.COL_12 ) )))) )\nAND ( ALIAS_3.COL_25 IN (0, 2)\nOR EXISTS (\nSELECT\n\
+    *\nFROM SCHEMA_1.TBL_8 AS ALIAS_8\nCROSS JOIN SCHEMA_1.TBL_7 AS ALIAS_9\nJOIN SCHEMA_1.TBL_6 ALIAS_10\
+    \ ON ALIAS_10.COL_28 = ALIAS_8.COL_28\nWHERE\nALIAS_8.COL_12 = ALIAS_3.COL_12\nAND ALIAS_9.COL_27\
+    \ = ALIAS_10.COL_28\nAND ALIAS_9.COL_28 = @PARAM_31\nAND ( ALIAS_10.COL_10 IS NULL ) )\nOR EXISTS\
+    \ (\nSELECT\n*\nFROM SCHEMA_1.TBL_8 AS ALIAS_8\nWHERE\n( ALIAS_1.COL_28 = ALIAS_8.COL_28 )\nAND (\
+    \ ALIAS_8.COL_12 = ALIAS_3.COL_12 ) ) )\nAND ALIAS_6.COL_22 IS NULL\nAND ALIAS_6.COL_23 = 'TEXT_LITERAL_2';\n\
+    $$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(\n    @PARAM_31 INTEGER\n)\nRETURNS TABLE\
+    \ \n(\n\taction_name TEXT,\n\tmode_name TEXT,\n\tmodule_name TEXT,\n\tmodules_order_num SMALLINT,\n\
+    \tmodes_order_num SMALLINT,\n\tactions_order_num SMALLINT,\n\tCOL_10 SMALLINT,\n\tCOL_28 INTEGER,\n\
+    \tCOL_29 TEXT,\n\tCOL_14 SMALLINT,\n\tCOL_11 TEXT,\n\tCOL_16 SMALLINT,\n\tCOL_18 SMALLINT\n)\nLANGUAGE\
+    \ SQL\nAS $function$\nSELECT\n\tALIAS_5.COL_13::TEXT AS action_name,\n\tALIAS_3.COL_17::TEXT AS mode_name,\n\
+    \tALIAS_6.COL_19::TEXT AS module_name,\n\tALIAS_6.COL_21 AS modules_order_num,\n\tALIAS_3.COL_21 AS\
+    \ modes_order_num,\n\tALIAS_5.COL_21 AS actions_order_num,\n\tALIAS_1.COL_10,\n\tALIAS_1.COL_28,\n\
+    \tCOALESCE( (CASE WHEN ALIAS_2.COL_26 IS NULL THEN ALIAS_1.COL_29 END), ALIAS_2.COL_26 || 'TEXT_LITERAL_1'\
+    \ || ALIAS_2.COL_15 )::TEXT AS COL_29,\n\tALIAS_5.COL_14,\n\tALIAS_5.COL_11::TEXT,\n\tALIAS_3.COL_16,\n\
+    \tALIAS_6.COL_18\nFROM SCHEMA_1.TBL_6 AS ALIAS_1\nLEFT JOIN SCHEMA_1.TBL_5 AS ALIAS_2 ON ALIAS_1.COL_28\
+    \ = ALIAS_2.COL_24\nJOIN SCHEMA_1.TBL_3 AS ALIAS_3 \n\tON EXISTS (SELECT 1 FROM SCHEMA_1.TBL_1 ALIAS_4\
+    \ WHERE ALIAS_4.COL_16 = ALIAS_3.COL_16)\nJOIN SCHEMA_1.TBL_1 AS ALIAS_5 ON ALIAS_5.COL_16 = ALIAS_3.COL_16\n\
+    JOIN SCHEMA_1.TBL_4 AS ALIAS_6 ON ALIAS_6.COL_18 = ALIAS_3.COL_18\nJOIN SCHEMA_1.TBL_2 AS ALIAS_7\
+    \ \n\tON ALIAS_7.COL_20 = ALIAS_3.COL_16 \n\tAND ALIAS_7.COL_22 IS NULL \n\tAND ALIAS_7.COL_23 = 'TEXT_LITERAL_2'\n\
+    WHERE ALIAS_1.COL_28 = @PARAM_31\n\tAND ALIAS_1.COL_10 IS NULL\n\tAND SCHEMA_1.sf_secure_get_action_visible(ALIAS_5.COL_11,\
+    \ ALIAS_5.COL_30) = 1\n\tAND (\n\t\tALIAS_5.COL_14 = 0\n\t\tOR (\n\t\t\tALIAS_5.COL_14 = 1\n\t\t\t\
+    AND EXISTS (\n\t\t\t\tSELECT 1\n\t\t\t\tFROM SCHEMA_1.TBL_1 ALIAS_8\n\t\t\t\tWHERE ALIAS_8.COL_16\
+    \ = ALIAS_5.COL_16\n\t\t\t\t\tAND ALIAS_8.COL_14 = 0\n\t\t\t\t\tAND (\n\t\t\t\t\t\tALIAS_8.COL_25\
+    \ IN (0, 2)\n\t\t\t\t\t\tOR EXISTS (\n\t\t\t\t\t\t\tSELECT 1\n\t\t\t\t\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\
+    \t\t\t\t\t\t\tJOIN SCHEMA_1.TBL_6 ALIAS_1 ON ALIAS_1.COL_28 = ALIAS_9.COL_28\n\t\t\t\t\t\t\tJOIN SCHEMA_1.TBL_7\
+    \ ALIAS_10 ON ALIAS_10.COL_27 = ALIAS_1.COL_28\n\t\t\t\t\t\t\tWHERE ALIAS_9.COL_12 = ALIAS_8.COL_12\n\
+    \t\t\t\t\t\t\t\tAND ALIAS_10.COL_28 = @PARAM_31\n\t\t\t\t\t\t\t\tAND ALIAS_1.COL_10 IS NULL\n\t\t\t\
+    \t\t\t)\n\t\t\t\t\t\tOR EXISTS (\n\t\t\t\t\t\t\tSELECT 1\n\t\t\t\t\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\
+    \t\t\t\t\t\t\tWHERE ALIAS_9.COL_28 = ALIAS_1.COL_28\n\t\t\t\t\t\t\t\tAND ALIAS_9.COL_12 = ALIAS_8.COL_12\n\
+    \t\t\t\t\t\t)\n\t\t\t\t\t)\n\t\t\t)\n\t\t)\n\t\t)\n\tAND (\n\t\tALIAS_5.COL_25 IN (0, 2)\n\t\tOR EXISTS\
+    \ (\n\t\t\tSELECT 1\n\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\t\t\tJOIN SCHEMA_1.TBL_6 ALIAS_1 ON ALIAS_1.COL_28\
+    \ = ALIAS_9.COL_28\n\t\t\tJOIN SCHEMA_1.TBL_7 ALIAS_10 ON ALIAS_10.COL_27 = ALIAS_1.COL_28\n\t\t\t\
+    WHERE ALIAS_9.COL_12 = ALIAS_5.COL_12\n\t\t\t\tAND ALIAS_10.COL_28 = @PARAM_31\n\t\t\t\tAND ALIAS_1.COL_10\
+    \ IS NULL\n\t\t)\n\t\tOR EXISTS (\n\t\t\tSELECT 1\n\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\t\t\tWHERE\
+    \ ALIAS_9.COL_28 = ALIAS_1.COL_28\n\t\t\t\tAND ALIAS_9.COL_12 = ALIAS_5.COL_12\n\t\t)\n\t\t);\n$function$;"
+corrections:
+- before_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(IN @PARAM_31 INTEGER)\nRETURNS TABLE (\n\t\
+    action_name TEXT\n\t, mode_name TEXT\n\t, module_name TEXT\n\t, modules_order_num SMALLINT\n\t, modes_order_num\
+    \ SMALLINT\n\t, actions_order_num SMALLINT\n\t, COL_10 SMALLINT\n\t, COL_28 INTEGER\n\t, COL_29 TEXT\n\
+    \t, COL_14 SMALLINT\n\t, COL_11 TEXT\n\t, COL_16 SMALLINT\n\t, COL_18 SMALLINT\n"
+  after_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(\n    @PARAM_31 INTEGER\n)\nRETURNS TABLE\
+    \ \n(\n\taction_name TEXT,\n\tmode_name TEXT,\n\tmodule_name TEXT,\n\tmodules_order_num SMALLINT,\n\
+    \tmodes_order_num SMALLINT,\n\tactions_order_num SMALLINT,\n\tCOL_10 SMALLINT,\n\tCOL_28 INTEGER,\n\
+    \tCOL_29 TEXT,\n\tCOL_14 SMALLINT,\n\tCOL_11 TEXT,\n\tCOL_16 SMALLINT,\n\tCOL_18 SMALLINT\n"
+  reuse: exact_or_renderer_review
+- before_masked: 'AS $$
+
+    '
+  after_masked: 'AS $function$
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: 'ALIAS_3.COL_13::TEXT AS "action_name"
+
+    , ALIAS_4.COL_17::TEXT AS "mode_name"
+
+    , ALIAS_5.COL_19::TEXT AS "module_name"
+
+    , ALIAS_5.COL_21 AS "modules_order_num"
+
+    , ALIAS_4.COL_21 AS "modes_order_num"
+
+    , ALIAS_3.COL_21 AS "actions_order_num"
+
+    , ALIAS_1.COL_10
+
+    , ALIAS_1.COL_28
+
+    , (COALESCE(ALIAS_2.COL_26, ALIAS_1.COL_29, ALIAS_2.COL_26 + ''TEXT_LITERAL_1'' + ALIAS_2.COL_15))::TEXT
+    AS COL_29
+
+    , ALIAS_3.COL_14
+
+    , ALIAS_3.COL_11::TEXT
+
+    , ALIAS_4.COL_16
+
+    , ALIAS_5.COL_18
+
+    FROM SCHEMA_1.TBL_6 AS ALIAS_1
+
+    JOIN SCHEMA_1.TBL_5 AS ALIAS_2 ON ALIAS_1.COL_28 *= ALIAS_2.COL_24
+
+    CROSS JOIN SCHEMA_1.TBL_1 AS ALIAS_3
+
+    JOIN SCHEMA_1.TBL_3 AS ALIAS_4 ON ALIAS_3.COL_16 = ALIAS_4.COL_16
+
+    JOIN SCHEMA_1.TBL_4 AS ALIAS_5 ON ALIAS_4.COL_18 = ALIAS_5.COL_18
+
+    JOIN SCHEMA_1.TBL_2 AS ALIAS_6 ON ALIAS_6.COL_20 = ALIAS_4.COL_16
+
+    WHERE
+
+    ALIAS_1.COL_28 = @PARAM_31
+
+    AND ALIAS_1.COL_10 IS NULL
+
+    AND SCHEMA_1.sf_secure_get_action_visible(ALIAS_3.COL_11, ALIAS_3.COL_30) = 1
+
+    AND ( ALIAS_3.COL_14 = 0
+
+    OR (ALIAS_3.COL_14 = 1
+
+    AND
+
+    EXISTS (
+
+    SELECT
+
+    *
+
+    FROM SCHEMA_1.TBL_1 ALIAS_7
+
+    WHERE
+
+    ALIAS_7.COL_16 = ALIAS_3.COL_16
+
+    AND ALIAS_7.COL_14 = 0
+
+    AND (ALIAS_7.COL_25 IN (0, 2)
+
+    OR EXISTS (
+
+    SELECT
+
+    *
+
+    FROM SCHEMA_1.TBL_8 AS ALIAS_8
+
+    CROSS JOIN SCHEMA_1.TBL_7 AS ALIAS_9
+
+    JOIN SCHEMA_1.TBL_6 ALIAS_10 ON ALIAS_10.COL_28 = ALIAS_8.COL_28
+
+    WHERE
+
+    ALIAS_8.COL_12 = ALIAS_7.COL_12
+
+    AND ALIAS_9.COL_27 = ALIAS_10.COL_28
+
+    AND ALIAS_9.COL_28 = @PARAM_31
+
+    AND ( ALIAS_10.COL_10 IS NULL ) )
+
+    OR EXISTS (
+
+    SELECT
+
+    *
+
+    FROM SCHEMA_1.TBL_8 AS ALIAS_8
+
+    WHERE
+
+    ( ALIAS_1.COL_28 = ALIAS_8.COL_28 )
+
+    AND ( ALIAS_8.COL_12 = ALIAS_7.COL_12 ) )))) )
+
+    AND ( ALIAS_3.COL_25 IN (0, 2)
+
+    OR EXISTS (
+
+    SELECT
+
+    *
+
+    FROM SCHEMA_1.TBL_8 AS ALIAS_8
+
+    CROSS JOIN SCHEMA_1.TBL_7 AS ALIAS_9
+
+    JOIN SCHEMA_1.TBL_6 ALIAS_10 ON ALIAS_10.COL_28 = ALIAS_8.COL_28
+
+    WHERE
+
+    ALIAS_8.COL_12 = ALIAS_3.COL_12
+
+    AND ALIAS_9.COL_27 = ALIAS_10.COL_28
+
+    AND ALIAS_9.COL_28 = @PARAM_31
+
+    AND ( ALIAS_10.COL_10 IS NULL ) )
+
+    OR EXISTS (
+
+    SELECT
+
+    *
+
+    FROM SCHEMA_1.TBL_8 AS ALIAS_8
+
+    WHERE
+
+    ( ALIAS_1.COL_28 = ALIAS_8.COL_28 )
+
+    AND ( ALIAS_8.COL_12 = ALIAS_3.COL_12 ) ) )
+
+    AND ALIAS_6.COL_22 IS NULL
+
+    AND ALIAS_6.COL_23 = ''TEXT_LITERAL_2'';
+
+    $$;
+
+    '
+  after_masked: "\tALIAS_5.COL_13::TEXT AS action_name,\n\tALIAS_3.COL_17::TEXT AS mode_name,\n\tALIAS_6.COL_19::TEXT\
+    \ AS module_name,\n\tALIAS_6.COL_21 AS modules_order_num,\n\tALIAS_3.COL_21 AS modes_order_num,\n\t\
+    ALIAS_5.COL_21 AS actions_order_num,\n\tALIAS_1.COL_10,\n\tALIAS_1.COL_28,\n\tCOALESCE( (CASE WHEN\
+    \ ALIAS_2.COL_26 IS NULL THEN ALIAS_1.COL_29 END), ALIAS_2.COL_26 || 'TEXT_LITERAL_1' || ALIAS_2.COL_15\
+    \ )::TEXT AS COL_29,\n\tALIAS_5.COL_14,\n\tALIAS_5.COL_11::TEXT,\n\tALIAS_3.COL_16,\n\tALIAS_6.COL_18\n\
+    FROM SCHEMA_1.TBL_6 AS ALIAS_1\nLEFT JOIN SCHEMA_1.TBL_5 AS ALIAS_2 ON ALIAS_1.COL_28 = ALIAS_2.COL_24\n\
+    JOIN SCHEMA_1.TBL_3 AS ALIAS_3 \n\tON EXISTS (SELECT 1 FROM SCHEMA_1.TBL_1 ALIAS_4 WHERE ALIAS_4.COL_16\
+    \ = ALIAS_3.COL_16)\nJOIN SCHEMA_1.TBL_1 AS ALIAS_5 ON ALIAS_5.COL_16 = ALIAS_3.COL_16\nJOIN SCHEMA_1.TBL_4\
+    \ AS ALIAS_6 ON ALIAS_6.COL_18 = ALIAS_3.COL_18\nJOIN SCHEMA_1.TBL_2 AS ALIAS_7 \n\tON ALIAS_7.COL_20\
+    \ = ALIAS_3.COL_16 \n\tAND ALIAS_7.COL_22 IS NULL \n\tAND ALIAS_7.COL_23 = 'TEXT_LITERAL_2'\nWHERE\
+    \ ALIAS_1.COL_28 = @PARAM_31\n\tAND ALIAS_1.COL_10 IS NULL\n\tAND SCHEMA_1.sf_secure_get_action_visible(ALIAS_5.COL_11,\
+    \ ALIAS_5.COL_30) = 1\n\tAND (\n\t\tALIAS_5.COL_14 = 0\n\t\tOR (\n\t\t\tALIAS_5.COL_14 = 1\n\t\t\t\
+    AND EXISTS (\n\t\t\t\tSELECT 1\n\t\t\t\tFROM SCHEMA_1.TBL_1 ALIAS_8\n\t\t\t\tWHERE ALIAS_8.COL_16\
+    \ = ALIAS_5.COL_16\n\t\t\t\t\tAND ALIAS_8.COL_14 = 0\n\t\t\t\t\tAND (\n\t\t\t\t\t\tALIAS_8.COL_25\
+    \ IN (0, 2)\n\t\t\t\t\t\tOR EXISTS (\n\t\t\t\t\t\t\tSELECT 1\n\t\t\t\t\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\
+    \t\t\t\t\t\t\tJOIN SCHEMA_1.TBL_6 ALIAS_1 ON ALIAS_1.COL_28 = ALIAS_9.COL_28\n\t\t\t\t\t\t\tJOIN SCHEMA_1.TBL_7\
+    \ ALIAS_10 ON ALIAS_10.COL_27 = ALIAS_1.COL_28\n\t\t\t\t\t\t\tWHERE ALIAS_9.COL_12 = ALIAS_8.COL_12\n\
+    \t\t\t\t\t\t\t\tAND ALIAS_10.COL_28 = @PARAM_31\n\t\t\t\t\t\t\t\tAND ALIAS_1.COL_10 IS NULL\n\t\t\t\
+    \t\t\t)\n\t\t\t\t\t\tOR EXISTS (\n\t\t\t\t\t\t\tSELECT 1\n\t\t\t\t\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\
+    \t\t\t\t\t\t\tWHERE ALIAS_9.COL_28 = ALIAS_1.COL_28\n\t\t\t\t\t\t\t\tAND ALIAS_9.COL_12 = ALIAS_8.COL_12\n\
+    \t\t\t\t\t\t)\n\t\t\t\t\t)\n\t\t\t)\n\t\t)\n\t\t)\n\tAND (\n\t\tALIAS_5.COL_25 IN (0, 2)\n\t\tOR EXISTS\
+    \ (\n\t\t\tSELECT 1\n\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\t\t\tJOIN SCHEMA_1.TBL_6 ALIAS_1 ON ALIAS_1.COL_28\
+    \ = ALIAS_9.COL_28\n\t\t\tJOIN SCHEMA_1.TBL_7 ALIAS_10 ON ALIAS_10.COL_27 = ALIAS_1.COL_28\n\t\t\t\
+    WHERE ALIAS_9.COL_12 = ALIAS_5.COL_12\n\t\t\t\tAND ALIAS_10.COL_28 = @PARAM_31\n\t\t\t\tAND ALIAS_1.COL_10\
+    \ IS NULL\n\t\t)\n\t\tOR EXISTS (\n\t\t\tSELECT 1\n\t\t\tFROM SCHEMA_1.TBL_8 ALIAS_9\n\t\t\tWHERE\
+    \ ALIAS_9.COL_28 = ALIAS_1.COL_28\n\t\t\t\tAND ALIAS_9.COL_12 = ALIAS_5.COL_12\n\t\t)\n\t\t);\n$function$;"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

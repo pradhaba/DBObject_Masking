@@ -1,0 +1,66 @@
+lesson_id: a56b52cb8aa24ddd5e1d
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- ELSE
+- IF
+- ISNULL
+- NESTED_SELECT
+- RESULT
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_2()\nresult( COL_8 varchar(50),\n       COL_7 integer\n\
+    \       )\nbegin\n    //******************************************************\n    // Created: 21.04.2020\
+    \ By: dasha\n    // SIR:     SIR 24603, 24604, 24801\n    // Prepared: 23.04.2020 By Gritsenko\n \
+    \   // SIR: #22336 File : WEB_227.sql\n    //******************************************************\n\
+    \    select\n    s.COL_8, \n       s.COL_7\nfrom\n    TBL_1 s\nwhere\n    s.COL_6 = 6\n    and s.COL_5\
+    \ = 'TEXT_LITERAL_1'\n    and s.COL_3 = 0\n    and isnull(set_code, 'TEXT_LITERAL_2') COL_10 in ('TEXT_LITERAL_3',\
+    \ 'TEXT_LITERAL_4' )\n    and ((SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n    0) <> 'TEXT_LITERAL_6'\n\
+    \        and isnull(set_code, 'TEXT_LITERAL_2') <> 'TEXT_LITERAL_7')\n        or SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n\
+    \        0) = 'TEXT_LITERAL_6')\nunion all\n    \tselect\n    if VAR_12 = 1 then 'TEXT_LITERAL_8'\n\
+    \    else 'TEXT_LITERAL_9' endif,\n    0\norder by\n    1,\n    2;\nend;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_2()\nRETURNS TABLE (\n\tCOL_8 TEXT\n\t,\
+    \ COL_7 INTEGER\n)\nLANGUAGE sql\nAS $function$\nBEGIN\n\n\tRETURN QUERY\n\tSELECT\n\t\tALIAS_1.COL_8::TEXT\n\
+    \t\t, ALIAS_1.COL_7::INTEGER\n\tFROM SCHEMA_1.TBL_1 ALIAS_1\n\tWHERE\n\tALIAS_1.COL_6 = 6\n\t\tAND\
+    \ ALIAS_1.COL_5 = 'TEXT_LITERAL_1'\n\t\tAND ALIAS_1.COL_3 = 0\n\t\tAND COALESCE(ALIAS_1.set_code,\
+    \ 'TEXT_LITERAL_2') COL_10 /* MIGRATION REVIEW [UNQUALIFIED_COLUMN_REVIEW]: source table unidentified;\
+    \ original expression preserved */ IN ('TEXT_LITERAL_3', 'TEXT_LITERAL_4' )\n\t\tAND ((SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n\
+    \t\t\t0) <> 'TEXT_LITERAL_6'\n\t\t\tAND COALESCE(ALIAS_1.set_code, 'TEXT_LITERAL_2') <> 'TEXT_LITERAL_7')\n\
+    \t\t\tOR SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n\t\t\t0) = 'TEXT_LITERAL_6')\n\tUNION ALL\n\
+    \tRETURN QUERY\n\tSELECT\n\t\tIF SCHEMA_1.get_int_var('TEXT_LITERAL_10') = 1 THEN 'TEXT_LITERAL_11';\n\
+    ELSE 'TEXT_LITERAL_12' END IF\n, 0\nORDER BY\n1\n, 2;\nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_2()\nRETURNS TABLE (\n    COL_8 text,\n\
+    \    COL_7 smallint\n)\nLANGUAGE sql\nAS $function$\nSELECT\n\tALIAS_1.COL_8\n\t, ALIAS_1.COL_7\n\
+    FROM SCHEMA_1.TBL_1 ALIAS_1\nWHERE ALIAS_1.COL_6 = 6\nAND ALIAS_1.COL_5 = 'TEXT_LITERAL_1'\nAND ALIAS_1.COL_3\
+    \ = 0\nAND COALESCE(set_code, 'TEXT_LITERAL_2') COL_10 IN ('TEXT_LITERAL_3', 'TEXT_LITERAL_4')\nAND\
+    \ (\n\t\t(SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5', 0) <> 'TEXT_LITERAL_6'\n\t\tAND COALESCE(set_code,\
+    \ 'TEXT_LITERAL_2') <> 'TEXT_LITERAL_7')\n\t\tOR SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5', 0)\
+    \ = 'TEXT_LITERAL_6'\n\t)\nUNION ALL\nSELECT\n\tCASE WHEN SCHEMA_1.get_int_var('TEXT_LITERAL_10')\
+    \ = 1 THEN 'TEXT_LITERAL_11'\n\t\tELSE 'TEXT_LITERAL_12'\n\tEND\n\t, 0\nORDER BY 1, 2;\n$function$;"
+corrections:
+- before_masked: "\tCOL_8 TEXT\n\t, COL_7 INTEGER\n"
+  after_masked: "    COL_8 text,\n    COL_7 smallint\n"
+  reuse: exact_or_renderer_review
+- before_masked: "BEGIN\n\n\tRETURN QUERY\n\tSELECT\n\t\tALIAS_1.COL_8::TEXT\n\t\t, ALIAS_1.COL_7::INTEGER\n\
+    \tFROM SCHEMA_1.TBL_1 ALIAS_1\n\tWHERE\n\tALIAS_1.COL_6 = 6\n\t\tAND ALIAS_1.COL_5 = 'TEXT_LITERAL_1'\n\
+    \t\tAND ALIAS_1.COL_3 = 0\n\t\tAND COALESCE(ALIAS_1.set_code, 'TEXT_LITERAL_2') COL_10 /* MIGRATION\
+    \ REVIEW [UNQUALIFIED_COLUMN_REVIEW]: source table unidentified; original expression preserved */\
+    \ IN ('TEXT_LITERAL_3', 'TEXT_LITERAL_4' )\n\t\tAND ((SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n\
+    \t\t\t0) <> 'TEXT_LITERAL_6'\n\t\t\tAND COALESCE(ALIAS_1.set_code, 'TEXT_LITERAL_2') <> 'TEXT_LITERAL_7')\n\
+    \t\t\tOR SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\n\t\t\t0) = 'TEXT_LITERAL_6')\n\tUNION ALL\n\
+    \tRETURN QUERY\n\tSELECT\n\t\tIF SCHEMA_1.get_int_var('TEXT_LITERAL_10') = 1 THEN 'TEXT_LITERAL_11';\n\
+    ELSE 'TEXT_LITERAL_12' END IF\n, 0\nORDER BY\n1\n, 2;\nEND;\n$$;\n"
+  after_masked: "SELECT\n\tALIAS_1.COL_8\n\t, ALIAS_1.COL_7\nFROM SCHEMA_1.TBL_1 ALIAS_1\nWHERE ALIAS_1.COL_6\
+    \ = 6\nAND ALIAS_1.COL_5 = 'TEXT_LITERAL_1'\nAND ALIAS_1.COL_3 = 0\nAND COALESCE(set_code, 'TEXT_LITERAL_2')\
+    \ COL_10 IN ('TEXT_LITERAL_3', 'TEXT_LITERAL_4')\nAND (\n\t\t(SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5',\
+    \ 0) <> 'TEXT_LITERAL_6'\n\t\tAND COALESCE(set_code, 'TEXT_LITERAL_2') <> 'TEXT_LITERAL_7')\n\t\t\
+    OR SCHEMA_1.sf_get_param_value('TEXT_LITERAL_5', 0) = 'TEXT_LITERAL_6'\n\t)\nUNION ALL\nSELECT\n\t\
+    CASE WHEN SCHEMA_1.get_int_var('TEXT_LITERAL_10') = 1 THEN 'TEXT_LITERAL_11'\n\t\tELSE 'TEXT_LITERAL_12'\n\
+    \tEND\n\t, 0\nORDER BY 1, 2;\n$function$;"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

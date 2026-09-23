@@ -1,0 +1,204 @@
+lesson_id: 2ee3c2ab65bc7d3aa97c
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- COMMA_JOIN
+- CREATE_PROCEDURE
+- ELSE
+- IF
+- JOIN
+- NESTED_SELECT
+- RESULT
+- RETURN
+- SELECT
+examples:
+  source_masked: "create PROCEDURE SCHEMA_1.PROC_9(in PARAM_54 integer, in PARAM_52 date, in PARAM_53\
+    \ date, in PARAM_56 integer, in PARAM_57 integer, in PARAM_55 integer default COL_10)\nresult(COL_24\
+    \ integer, COL_25 date, COL_28 integer, COL_30 char(3), COL_31 char(30), COL_26 char(22), COL_29 char(15),\
+    \ COL_32 char(10), COL_27 char(COL_11), COL_33 char(200), COL_45 date, COL_48 integer, COL_44 char(16),\
+    \ COL_49 char(30), COL_46 char(22), COL_47 char(15), COL_50 char(10), COL_51 char(200))\nbegin\n \
+    \   //*********************\n    // Purpose:   Report 'TEXT_LITERAL_1'\n    // ********************\n\
+    \    // Parameters:\n    //\tPARAM_54\t\t-- not used (for future)\n    //\tPARAM_52\t--\tApp period\
+    \ start date (date of booking)\n    //\tPARAM_53\t--\tApp period end date  (date of booking)\n   \
+    \ //\tPARAM_56 = TBL_8.COL_39\n    //\tPARAM_55\t- Practice id (-COL_11 = ALL) not used (for future)\n\
+    \    // ********************\n    // Return values:\n    //\tCOL_24 integer\n    //\tCOL_25 date\n\
+    \    //\tCOL_28 integer\n    //\tCOL_30 char(3)\n    //\tCOL_31 char(30)\n    //\tCOL_26 char(22)\n\
+    \    //\tCOL_29 char(15)\n    //\tCOL_32 char(10)\n    //\tCOL_27 char(COL_11)\n    //\tCOL_33 char(200)\n\
+    \    //\n  //\tCOL_45 date\n    //\tCOL_48\tinteger\n    //\tCOL_44 char(16)\n    //\tCOL_49 char(30)\n\
+    \    //\tCOL_46 char(22)\n    //\tCOL_47 char(15)\n    //\tCOL_50 char(10)\n    //\tCOL_51 char(200)\n\
+    \    // ********************\n    // Remarks:\n    // ********************\n    // Created:\t\t\t\t\
+    26.01.2004\t\tBy:  Pozdeev\n    // ********************\n    // Modified:\t \t\t\t26.01.2004\t\tBy:\
+    \  Pozdeev\n    // What:  \t\t\t\tSIR# DT00001240\t\tCreated\n    // ********************\n    //\
+    \ Modified:\t \t\t\t25.04.2005\t\tBy:  Pershin\n    // What:  \t\t\t\tSIR# DT00002420 Appointed by\
+    \ Report - more filters \t\t\n    // ********************\n    //Modified:\t10.12.2020\n    //Who:\t\
+    Vladimir Soloviev\n    //SIR:\tDT00026155, POTP_04.SQL\n    //What: adaptation for potential TBL_3,\
+    \ fixed by #DT00027153\n    //*********************\n    //\n  select TBL_1.COL_16 as COL_24,\n  \
+    \  min(\"date\"(TBL_2.COL_17)) as COL_25,\n    min(TBL_7.COL_22) as COL_28,\n    min(TBL_7.COL_37),\n\
+    \    min(TBL_7.COL_40),\n    min(TBL_7.COL_19),\n    min(TBL_7.COL_23),\n    (\n    select\n     \
+    \   TBL_4.COL_42\n    from\n        TBL_4\n    where\n        TBL_4.COL_41 = min(TBL_7.COL_41)),\n\
+    \    min(TBL_7.COL_21),\n    SCHEMA_1.sf_get_provider_info(COL_28,\n    COL_11,\n    VAR_58,\n   \
+    \ COL_10),\n    //COL_11=(Code)+Title+COL_40+COL_19+COL_23,,,, COL_10=(other_staff-not used)\n   \
+    \ //\n    min(TBL_1.COL_15) as COL_45,\n    min(Coalesce(- TBL_5.COL_38, TBL_3.COL_35)) as COL_48,\n\
+    \    //10.12.2020 Vladimir Soloviev SIR #DT00026155 add Coalesce...\n    (If COL_48 < COL_10 Then\
+    \ 'TEXT_LITERAL_2'\n    Else min(TBL_3.COL_36)\nEnd If),\n    //10.12.2020 Vladimir Soloviev SIR #DT00026155\
+    \ add If...\n    (If COL_48 < COL_10 Then min(TBL_6.COL_40)\n    Else min(TBL_3.COL_40)\nEnd If),\n\
+    \    //10.12.2020 Vladimir Soloviev SIR #DT00026155 add If...\n    (If COL_48 < COL_10 Then min(TBL_6.COL_19)\n\
+    \    Else min(TBL_3.COL_19)\nEnd If),\n    //10.12.2020 Vladimir Soloviev SIR #DT00026155 add If...\n\
+    \    (If COL_48 < COL_10 Then min(TBL_6.COL_23)\n    Else min(TBL_3.COL_23)\nEnd If),\n    //10.12.2020\
+    \ Vladimir Soloviev SIR #DT00026155 add If...\n    (\n    select\n        TBL_4.COL_42\n    from\n\
+    \        TBL_4\n    where\n        TBL_4.COL_41 = (If COL_48 < COL_10 Then min(TBL_6.COL_41)\n   \
+    \     Else min(TBL_3.COL_41)\n    End If)),\n    //10.12.2020 Vladimir Soloviev SIR #DT00026155 add\
+    \ If...\n    SCHEMA_1.sf_get_patient_info(COL_48,\n    COL_11,\n    VAR_58)\nfrom\n    //COL_11=Code+Title+COL_40+COL_19+COL_23\n\
+    \    TBL_1\nleft outer join TBL_2 on\n    (TBL_1.COL_16 = TBL_2.COL_16 and TBL_2.COL_43 = COL_10),\n\
+    \    TBL_2\nleft outer join TBL_7 on\n    (TBL_2.COL_22 = TBL_7.COL_22),\n    TBL_1\nleft outer join\
+    \ TBL_3 on\n    (TBL_1.COL_34 = TBL_3.COL_35),\n    TBL_1\nleft outer join TBL_5 on\n    (TBL_1.COL_18\
+    \ = TBL_5.COL_18),\n    //10.12.2020 Vladimir Soloviev SIR #DT00026155\n    TBL_5\nleft outer join\
+    \ TBL_6 on\n    TBL_6.COL_35 = TBL_5.COL_38,\n    //17.03.2020 Vladimir Soloviev SIR #DT00027153\n\
+    \    TBL_8 wt_1,\n    TBL_8 wt_2\nwhere\n    PARAM_56 = wt_1.COL_39\n    and\n\t PARAM_57 = wt_2.COL_39\n\
+    \    and\n    TBL_7.COL_22 = wt_1.COL_20\n    and\n\t COL_14 = wt_2.COL_20\n    and\n    \"date\"\
+    (TBL_2.COL_17) between PARAM_52 and PARAM_53\n    and\n    TBL_1.COL_16 > COL_10\ngroup by\n    TBL_1.COL_16\n\
+    \    //\\\\\nend;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(IN PARAM_54 INTEGER, IN PARAM_52 DATE,\
+    \ IN PARAM_53 DATE, IN PARAM_56 INTEGER, IN PARAM_57 INTEGER, IN PARAM_55 INTEGER DEFAULT COL_10)\n\
+    RETURNS TABLE (\n\tCOL_24 INTEGER, COL_25 DATE, COL_28 INTEGER, COL_30 TEXT, COL_31 TEXT, COL_26 TEXT,\
+    \ COL_29 TEXT, COL_32 TEXT, COL_27 TEXT, COL_33 TEXT, COL_45 DATE, COL_48 INTEGER, COL_44 TEXT, COL_49\
+    \ TEXT, COL_46 TEXT, COL_47 TEXT, COL_50 TEXT, COL_51 TEXT\n)\nLANGUAGE PLPGSQL\nAS $function$\nBEGIN\n\
+    \n\tRETURN QUERY\n\tSELECT\n\t\tALIAS_2.COL_16 AS COL_24\n\t\t, MIN((ALIAS_3.COL_17)::DATE) AS COL_25\n\
+    \t\t, MIN(ALIAS_4.COL_22) AS COL_28\n\t\t, (MIN(ALIAS_4.COL_37))::TEXT\n\t\t, (MIN(ALIAS_4.COL_40))::TEXT\n\
+    \t\t, (MIN(ALIAS_4.COL_19))::TEXT\n\t\t, (MIN(ALIAS_4.COL_23))::TEXT\n\t\t, ((\n\t\tSELECT\n\t\tALIAS_1.COL_42\n\
+    \t\tFROM SCHEMA_1.TBL_4 AS ALIAS_1\n\t\tWHERE\n\t\tALIAS_1.COL_41 = MIN(ALIAS_4.COL_41)))::TEXT,\n\
+    \t\t(MIN(ALIAS_4.COL_21))::TEXT,\n\t\t(SCHEMA_1.sf_get_provider_info((MIN(ALIAS_4.COL_22)), COL_11,\
+    \ SCHEMA_1.get_int_var('TEXT_LITERAL_3'), COL_10::SMALLINT))::TEXT,\n\t\tMIN(ALIAS_2.COL_15) AS COL_45,\n\
+    \t\tMIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35)) AS COL_48,\n\t\t((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38,\
+    \ ALIAS_5.COL_35))) < COL_10 THEN 'TEXT_LITERAL_2' ELSE MIN(ALIAS_5.COL_36) END))::TEXT,\n\t\t((CASE\
+    \ WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN MIN(ALIAS_7.COL_40) ELSE MIN(ALIAS_5.COL_40)\
+    \ END))::TEXT,\n\t\t((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN MIN(ALIAS_7.COL_19)\
+    \ ELSE MIN(ALIAS_5.COL_19) END))::TEXT,\n\t\t((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35)))\
+    \ < COL_10 THEN MIN(ALIAS_7.COL_23) ELSE MIN(ALIAS_5.COL_23) END))::TEXT,\n\t\t((\n\t\tSELECT\n\t\t\
+    ALIAS_1.COL_42\n\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_1\n\t\tWHERE\n\t\tALIAS_1.COL_41 = (CASE WHEN (MIN(COALESCE(-\
+    \ ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN MIN(ALIAS_7.COL_41) ELSE MIN(ALIAS_5.COL_41) END)))::TEXT,\n\
+    \t\t(SCHEMA_1.sf_get_patient_info((MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))),\n\t\tCOL_11,\n\
+    \t\tSCHEMA_1.get_int_var('TEXT_LITERAL_3')))::TEXT\n\tFROM SCHEMA_1.TBL_1 AS ALIAS_2\n\tLEFT OUTER\
+    \ JOIN SCHEMA_1.TBL_2 AS ALIAS_3 ON\n\t(ALIAS_2.COL_16 = ALIAS_3.COL_16 AND ALIAS_3.COL_43 = COL_10)\n\
+    \tLEFT OUTER JOIN SCHEMA_1.TBL_7 AS ALIAS_4 ON\n\t(ALIAS_3.COL_22 = ALIAS_4.COL_22)\n\tLEFT OUTER\
+    \ JOIN SCHEMA_1.TBL_3 AS ALIAS_5 ON\n\t(ALIAS_2.COL_34 = ALIAS_5.COL_35)\n\tLEFT OUTER JOIN SCHEMA_1.TBL_5\
+    \ AS ALIAS_6 ON\n\t(ALIAS_2.COL_18 = ALIAS_6.COL_18)\n\tLEFT OUTER JOIN SCHEMA_1.TBL_6 AS ALIAS_7\
+    \ ON\n\tALIAS_7.COL_35 = ALIAS_6.COL_38\n\tCROSS JOIN SCHEMA_1.TBL_8 ALIAS_8\n\tCROSS JOIN SCHEMA_1.TBL_8\
+    \ ALIAS_9\n\tWHERE\n\tPARAM_56 = ALIAS_8.COL_39\n\t\tAND\n\tPARAM_57 = ALIAS_9.COL_39\n\t\tAND\n\t\
+    ALIAS_4.COL_22 = ALIAS_8.COL_20\n\t\tAND\n\tCOL_14 /* MIGRATION REVIEW [UNQUALIFIED_COLUMN_REVIEW]:\
+    \ source table unidentified; original expression preserved */ = ALIAS_9.COL_20\n\t\tAND\n\t(ALIAS_3.COL_17)::DATE\
+    \ BETWEEN PARAM_52 AND PARAM_53\n\t\tAND\n\tALIAS_2.COL_16 > COL_10\n\tGROUP BY\n\tALIAS_2.COL_16;\n\
+    \nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(\n\tIN PARAM_54 integer\n\t, IN PARAM_52\
+    \ date\n\t, IN PARAM_53 date\n\t, IN PARAM_56 integer\n\t, IN PARAM_57 integer\n\t, IN PARAM_55 integer\
+    \ DEFAULT COL_10)\nRETURNS TABLE (\n\tCOL_24 integer\n\t, COL_25 date\n\t, COL_28 integer\n\t, COL_30\
+    \ text\n\t, COL_31 text\n\t, COL_26 text\n\t, COL_29 text\n\t, COL_32 text\n\t, COL_27 text\n\t, COL_33\
+    \ text\n\t, COL_45 date\n\t, COL_48 integer\n\t, COL_44 text\n\t, COL_49 text\n\t, COL_46 text\n\t\
+    , COL_47 text\n\t, COL_50 text\n\t, COL_51 text\n)\nLANGUAGE sql\nAS $function$\nSELECT\n\tALIAS_2.COL_16\
+    \ AS COL_24\n\t, MIN((ALIAS_3.COL_17)::date) AS COL_25\n\t, MIN(ALIAS_4.COL_22) AS COL_28\n\t, (MIN(ALIAS_4.COL_37))::text\n\
+    \t, (MIN(ALIAS_4.COL_40))::text\n\t, (MIN(ALIAS_4.COL_19))::text\n\t, (MIN(ALIAS_4.COL_23))::text\n\
+    \t, ((SELECT ALIAS_1.COL_42\n\t\tFROM SCHEMA_1.TBL_4 AS ALIAS_1\n\t\tWHERE\n\t\tALIAS_1.COL_41 = MIN(ALIAS_4.COL_41)))::text\n\
+    \t, (MIN(ALIAS_4.COL_21))::text\n\t, (SCHEMA_1.sf_get_provider_info((MIN(ALIAS_4.COL_22)), COL_11,\
+    \ SCHEMA_1.get_int_var('TEXT_LITERAL_3'), COL_10::SMALLINT))::text\n\t, MIN(ALIAS_2.COL_15) AS COL_45\n\
+    \t, MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35)) AS COL_48\n\t, ((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38,\
+    \ ALIAS_5.COL_35))) < COL_10 THEN 'TEXT_LITERAL_2' ELSE MIN(ALIAS_5.COL_36) END))::text\n\t, ((CASE\
+    \ WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN MIN(ALIAS_7.COL_40) ELSE MIN(ALIAS_5.COL_40)\
+    \ END))::text\n\t, ((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN MIN(ALIAS_7.COL_19)\
+    \ ELSE MIN(ALIAS_5.COL_19) END))::text\n\t, ((CASE WHEN (MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35)))\
+    \ < COL_10 THEN MIN(ALIAS_7.COL_23) ELSE MIN(ALIAS_5.COL_23) END))::text\n\t, ((SELECT ALIAS_1.COL_42\n\
+    \t\tFROM SCHEMA_1.TBL_4 AS ALIAS_1\n\t\tWHERE ALIAS_1.COL_41 = (\n\t\t\tCASE \n\t\t\t\tWHEN (MIN(COALESCE(-\
+    \ ALIAS_6.COL_38, ALIAS_5.COL_35))) < COL_10 THEN \n\t\t\t\t\tMIN(ALIAS_7.COL_41) \n\t\t\tELSE MIN(ALIAS_5.COL_41)\
+    \ \n\t\t\tEND)))::text\n\t, (SCHEMA_1.sf_get_patient_info((MIN(COALESCE(- ALIAS_6.COL_38, ALIAS_5.COL_35))),\
+    \ COL_11, SCHEMA_1.get_int_var('TEXT_LITERAL_3')))::text\nFROM SCHEMA_1.TBL_1 AS ALIAS_2\n\tLEFT OUTER\
+    \ JOIN SCHEMA_1.TBL_2 AS ALIAS_3 ON\n\t\t(ALIAS_2.COL_16 = ALIAS_3.COL_16 AND ALIAS_3.COL_43 = COL_10)\n\
+    \tLEFT OUTER JOIN SCHEMA_1.TBL_7 AS ALIAS_4 ON\n\t\t(ALIAS_3.COL_22 = ALIAS_4.COL_22)\n\tLEFT OUTER\
+    \ JOIN SCHEMA_1.TBL_3 AS ALIAS_5 ON\n\t\t(ALIAS_2.COL_34 = ALIAS_5.COL_35)\n\tLEFT OUTER JOIN SCHEMA_1.TBL_5\
+    \ AS ALIAS_6 ON\n\t\t(ALIAS_2.COL_18 = ALIAS_6.COL_18)\n\tLEFT OUTER JOIN SCHEMA_1.TBL_6 AS ALIAS_7\
+    \ ON\n\t\tALIAS_7.COL_35 = ALIAS_6.COL_38\n\tLEFT OUTER JOIN SCHEMA_2.TBL_8 AS ALIAS_8 ON\n\t\tALIAS_4.COL_22\
+    \ = ALIAS_8.COL_20\n\tLEFT OUTER JOIN SCHEMA_2.TBL_8 AS ALIAS_9 ON\n\t\tALIAS_2.COL_14 = ALIAS_9.COL_20\n\
+    WHERE\n\tALIAS_8.COL_39 = PARAM_56\n\tAND ALIAS_9.COL_39 = PARAM_57\n\tAND (ALIAS_3.COL_17)::date\
+    \ BETWEEN PARAM_52 AND PARAM_53\n\tAND ALIAS_2.COL_16 > COL_10\nGROUP BY ALIAS_2.COL_16;\n$function$;"
+corrections:
+- before_masked: 'CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(IN PARAM_54 INTEGER, IN PARAM_52 DATE, IN
+    PARAM_53 DATE, IN PARAM_56 INTEGER, IN PARAM_57 INTEGER, IN PARAM_55 INTEGER DEFAULT COL_10)
+
+    '
+  after_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.PROC_9(\n\tIN PARAM_54 integer\n\t, IN PARAM_52 date\n\
+    \t, IN PARAM_53 date\n\t, IN PARAM_56 integer\n\t, IN PARAM_57 integer\n\t, IN PARAM_55 integer DEFAULT\
+    \ COL_10)\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tCOL_24 INTEGER, COL_25 DATE, COL_28 INTEGER, COL_30 TEXT, COL_31 TEXT, COL_26 TEXT,\
+    \ COL_29 TEXT, COL_32 TEXT, COL_27 TEXT, COL_33 TEXT, COL_45 DATE, COL_48 INTEGER, COL_44 TEXT, COL_49\
+    \ TEXT, COL_46 TEXT, COL_47 TEXT, COL_50 TEXT, COL_51 TEXT\n"
+  after_masked: "\tCOL_24 integer\n\t, COL_25 date\n\t, COL_28 integer\n\t, COL_30 text\n\t, COL_31 text\n\
+    \t, COL_26 text\n\t, COL_29 text\n\t, COL_32 text\n\t, COL_27 text\n\t, COL_33 text\n\t, COL_45 date\n\
+    \t, COL_48 integer\n\t, COL_44 text\n\t, COL_49 text\n\t, COL_46 text\n\t, COL_47 text\n\t, COL_50\
+    \ text\n\t, COL_51 text\n"
+  reuse: exact_or_renderer_review
+- before_masked: 'LANGUAGE PLPGSQL
+
+    '
+  after_masked: 'LANGUAGE sql
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: "BEGIN\n\n\tRETURN QUERY\n\tSELECT\n\t\taap.COL_16 AS COL_24\n\t\t, MIN((apb.COL_17)::DATE)\
+    \ AS COL_25\n\t\t, MIN(sta.COL_22) AS COL_28\n\t\t, (MIN(sta.COL_37))::TEXT\n\t\t, (MIN(sta.COL_40))::TEXT\n\
+    \t\t, (MIN(sta.COL_19))::TEXT\n\t\t, (MIN(sta.COL_23))::TEXT\n\t\t, ((\n\t\tSELECT\n\t\tpet.COL_42\n"
+  after_masked: "SELECT\n\taap.COL_16 AS COL_24\n\t, MIN((apb.COL_17)::date) AS COL_25\n\t, MIN(sta.COL_22)\
+    \ AS COL_28\n\t, (MIN(sta.COL_37))::text\n\t, (MIN(sta.COL_40))::text\n\t, (MIN(sta.COL_19))::text\n\
+    \t, (MIN(sta.COL_23))::text\n\t, ((SELECT pet.COL_42\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t\tpet.COL_41 = MIN(sta.COL_41)))::TEXT,\n\t\t(MIN(sta.COL_21))::TEXT,\n\t\t(SCHEMA_1.sf_get_provider_info((MIN(sta.COL_22)),\
+    \ COL_11, SCHEMA_1.get_int_var('TEXT_LITERAL_3'), COL_10::SMALLINT))::TEXT,\n\t\tMIN(aap.COL_15) AS\
+    \ COL_45,\n\t\tMIN(COALESCE(- poa.COL_38, pat.COL_35)) AS COL_48,\n\t\t((CASE WHEN (MIN(COALESCE(-\
+    \ poa.COL_38, pat.COL_35))) < COL_10 THEN 'TEXT_LITERAL_2' ELSE MIN(pat.COL_36) END))::TEXT,\n\t\t\
+    ((CASE WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10 THEN MIN(pop.COL_40) ELSE MIN(pat.COL_40)\
+    \ END))::TEXT,\n\t\t((CASE WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10 THEN MIN(pop.COL_19)\
+    \ ELSE MIN(pat.COL_19) END))::TEXT,\n\t\t((CASE WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10\
+    \ THEN MIN(pop.COL_23) ELSE MIN(pat.COL_23) END))::TEXT,\n\t\t((\n\t\tSELECT\n\t\tpet.COL_42\n"
+  after_masked: "\t\tpet.COL_41 = MIN(sta.COL_41)))::text\n\t, (MIN(sta.COL_21))::text\n\t, (SCHEMA_1.sf_get_provider_info((MIN(sta.COL_22)),\
+    \ COL_11, SCHEMA_1.get_int_var('TEXT_LITERAL_3'), COL_10::SMALLINT))::text\n\t, MIN(aap.COL_15) AS\
+    \ COL_45\n\t, MIN(COALESCE(- poa.COL_38, pat.COL_35)) AS COL_48\n\t, ((CASE WHEN (MIN(COALESCE(- poa.COL_38,\
+    \ pat.COL_35))) < COL_10 THEN 'TEXT_LITERAL_2' ELSE MIN(pat.COL_36) END))::text\n\t, ((CASE WHEN (MIN(COALESCE(-\
+    \ poa.COL_38, pat.COL_35))) < COL_10 THEN MIN(pop.COL_40) ELSE MIN(pat.COL_40) END))::text\n\t, ((CASE\
+    \ WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10 THEN MIN(pop.COL_19) ELSE MIN(pat.COL_19)\
+    \ END))::text\n\t, ((CASE WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10 THEN MIN(pop.COL_23)\
+    \ ELSE MIN(pat.COL_23) END))::text\n\t, ((SELECT pet.COL_42\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t\tWHERE\n\t\tpet.COL_41 = (CASE WHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35))) < COL_10\
+    \ THEN MIN(pop.COL_41) ELSE MIN(pat.COL_41) END)))::TEXT,\n\t\t(SCHEMA_1.sf_get_patient_info((MIN(COALESCE(-\
+    \ poa.COL_38, pat.COL_35))),\n\t\tCOL_11,\n\t\tSCHEMA_1.get_int_var('TEXT_LITERAL_3')))::TEXT\n\t\
+    FROM SCHEMA_1.TBL_1 AS ALIAS_1\n"
+  after_masked: "\t\tWHERE pet.COL_41 = (\n\t\t\tCASE \n\t\t\t\tWHEN (MIN(COALESCE(- poa.COL_38, pat.COL_35)))\
+    \ < COL_10 THEN \n\t\t\t\t\tMIN(pop.COL_41) \n\t\t\tELSE MIN(pat.COL_41) \n\t\t\tEND)))::text\n\t\
+    , (SCHEMA_1.sf_get_patient_info((MIN(COALESCE(- poa.COL_38, pat.COL_35))), COL_11, SCHEMA_1.get_int_var('TEXT_LITERAL_3')))::text\n\
+    FROM SCHEMA_1.TBL_1 AS ALIAS_1\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t(aap.COL_16 = apb.COL_16 AND apb.COL_43 = COL_10)\n"
+  after_masked: "\t\t(aap.COL_16 = apb.COL_16 AND apb.COL_43 = COL_10)\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t(apb.COL_22 = sta.COL_22)\n"
+  after_masked: "\t\t(apb.COL_22 = sta.COL_22)\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t(aap.COL_34 = pat.COL_35)\n"
+  after_masked: "\t\t(aap.COL_34 = pat.COL_35)\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\t(aap.COL_18 = poa.COL_18)\n"
+  after_masked: "\t\t(aap.COL_18 = poa.COL_18)\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\tpop.COL_35 = poa.COL_38\n\tCROSS JOIN SCHEMA_1.TBL_8 ALIAS_1\n\tCROSS JOIN SCHEMA_1.TBL_8\
+    \ ALIAS_2\n\tWHERE\n\tPARAM_56 = ALIAS_1.COL_39\n\t\tAND\n\tPARAM_57 = ALIAS_2.COL_39\n\t\tAND\n\t\
+    sta.COL_22 = ALIAS_1.COL_20\n\t\tAND\n\tCOL_14 /* MIGRATION REVIEW [UNQUALIFIED_COLUMN_REVIEW]: source\
+    \ table unidentified; original expression preserved */ = ALIAS_2.COL_20\n\t\tAND\n\t(apb.COL_17)::DATE\
+    \ BETWEEN PARAM_52 AND PARAM_53\n\t\tAND\n\taap.COL_16 > COL_10\n\tGROUP BY\n\taap.COL_16;\n\nEND;\n\
+    $$;\n"
+  after_masked: "\t\tpop.COL_35 = poa.COL_38\n\tLEFT OUTER JOIN SCHEMA_2.TBL_8 AS ALIAS_1 ON\n\t\tsta.COL_22\
+    \ = ALIAS_1.COL_20\n\tLEFT OUTER JOIN SCHEMA_2.TBL_8 AS ALIAS_2 ON\n\t\taap.COL_14 = ALIAS_2.COL_20\n\
+    WHERE\n\tALIAS_1.COL_39 = PARAM_56\n\tAND ALIAS_2.COL_39 = PARAM_57\n\tAND (apb.COL_17)::date BETWEEN\
+    \ PARAM_52 AND PARAM_53\n\tAND aap.COL_16 > COL_10\nGROUP BY aap.COL_16;\n$function$;"
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference

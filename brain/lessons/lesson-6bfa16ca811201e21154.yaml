@@ -1,0 +1,63 @@
+lesson_id: 6bfa16ca811201e21154
+schema_version: 1
+dialects:
+  source: sybase_asa
+  target: postgresql
+features:
+- CREATE_FUNCTION
+- ELSE
+- IF
+- RETURN
+examples:
+  source_masked: "create function SCHEMA_1.FUNC_1(in @PARAM_2 integer)\nreturns integer\nbegin\n    //*********************\n\
+    \    // Purpose: Get Third Party type\n    // Parameters:\t@PARAM_2 - Third Party Type\n    //\t\t\
+    \t\t\t\t\t\t\t0 - Other\n    //\t\t\t\t\t\t\t\t\t1 - Insurance\n    //\t\t\t\t\t\t\t\t\t12- Guardian\n\
+    \    //*********************\n    //Return values: 0 - Other Third Party, 1 - Insurance, 2 - Not defined\n\
+    \    //*********************\n    //Created: 23.01.2004 By: Andrew\n    //*********************\n\
+    \  declare @VAR_3 integer;\n\nset\n@VAR_3 = 2;\n\nif VAR_4 = 1 then\n//RUS\n    if @PARAM_2 in(1,\
+    \ 12) then\n//Insurance or Guardian\n      set\n@VAR_3 = 1\nend if;\n\nif @PARAM_2 = 0 then\n//Other\n\
+    \      set\n@VAR_3 = 0\nend if\nelse\n//AUS\n    if @PARAM_2 = 1 then\n//Insurance\n      set\n@VAR_3\
+    \ = 1\nend if;\n\nif @PARAM_2 in(0, 12) then\n//Other or Guardian\n      set\n@VAR_3 = 0\nend if\n\
+    end if;\n\nreturn @VAR_3\nend;"
+  generated_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.FUNC_1(IN @PARAM_2 INTEGER)\nRETURNS INTEGER\n\
+    LANGUAGE sql\nAS $$\nDECLARE\n@VAR_3 INTEGER;\nBEGIN\n\n\t@VAR_3 := 2;\n\n\tIF SCHEMA_1.get_int_var('TEXT_LITERAL_1')\
+    \ = 1 THEN\n\n\t\tIF @PARAM_2 IN(1, 12) THEN\n\n\t\t\t@VAR_3 := 1;\n\t\tEND IF;\n\n\t\tIF @PARAM_2\
+    \ = 0 THEN\n\n\t\t\t@VAR_3 := 0;\n\t\tEND IF;\n\tELSE\n\n\t\tIF @PARAM_2 = 1 THEN\n\n\t\t\t@VAR_3\
+    \ := 1;\n\t\tEND IF;\n\n\t\tIF @PARAM_2 IN(0, 12) THEN\n\n\t\t\t@VAR_3 := 0;\n\t\tEND IF;\n\tEND IF;\n\
+    \n\tRETURN @VAR_3\nEND;\n$$;\n"
+  corrected_masked: "CREATE OR REPLACE FUNCTION SCHEMA_1.FUNC_1(@PARAM_2 integer)\nRETURNS integer\nLANGUAGE\
+    \ sql\nAS $function$\nSELECT CASE\n\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_1') = 1 THEN\n\t\tCASE\n\
+    \t\t\tWHEN @PARAM_2 IN (1, 12) THEN 1\n\t\t\tWHEN @PARAM_2 = 0 THEN 0\n\t\t\tELSE 2\n\t\tEND\n\tELSE\n\
+    \t\tCASE\n\t\t\tWHEN @PARAM_2 = 1 THEN 1\n\t\t\tWHEN @PARAM_2 IN (0, 12) THEN 0\n\t\t\tELSE 2\n\t\t\
+    END\nEND;\n$function$;"
+corrections:
+- before_masked: 'CREATE OR REPLACE FUNCTION SCHEMA_1.FUNC_1(IN @PARAM_2 INTEGER)
+
+    RETURNS INTEGER
+
+    '
+  after_masked: 'CREATE OR REPLACE FUNCTION SCHEMA_1.FUNC_1(@PARAM_2 integer)
+
+    RETURNS integer
+
+    '
+  reuse: exact_or_renderer_review
+- before_masked: "AS $$\nDECLARE\n@VAR_3 INTEGER;\nBEGIN\n\n\t@VAR_3 := 2;\n\n\tIF SCHEMA_1.get_int_var('TEXT_LITERAL_1')\
+    \ = 1 THEN\n\n\t\tIF @PARAM_2 IN(1, 12) THEN\n\n\t\t\t@VAR_3 := 1;\n\t\tEND IF;\n\n\t\tIF @PARAM_2\
+    \ = 0 THEN\n\n\t\t\t@VAR_3 := 0;\n\t\tEND IF;\n"
+  after_masked: "AS $function$\nSELECT CASE\n\tWHEN SCHEMA_1.get_int_var('TEXT_LITERAL_1') = 1 THEN\n\t\
+    \tCASE\n\t\t\tWHEN @PARAM_2 IN (1, 12) THEN 1\n\t\t\tWHEN @PARAM_2 = 0 THEN 0\n\t\t\tELSE 2\n\t\t\
+    END\n"
+  reuse: exact_or_renderer_review
+- before_masked: "\n\t\tIF @PARAM_2 = 1 THEN\n\n\t\t\t@VAR_3 := 1;\n\t\tEND IF;\n\n\t\tIF @PARAM_2 IN(0,\
+    \ 12) THEN\n\n\t\t\t@VAR_3 := 0;\n\t\tEND IF;\n\tEND IF;\n\n\tRETURN @VAR_3\n"
+  after_masked: "\t\tCASE\n\t\t\tWHEN @PARAM_2 = 1 THEN 1\n\t\t\tWHEN @PARAM_2 IN (0, 12) THEN 0\n\t\t\
+    \tELSE 2\n\t\tEND\n"
+  reuse: exact_or_renderer_review
+- before_masked: '$$;
+
+    '
+  after_masked: $function$;
+  reuse: exact_or_renderer_review
+verification:
+  status: approved_human_reference
