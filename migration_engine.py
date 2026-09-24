@@ -86,7 +86,7 @@ def migrate_text(text: str, source_dialect: str, target_dialect: str, database_p
         preliminary_target_type = classify_postgresql_implementation(text, target_override)["object_type"]
         from asa_postgresql_rewrites import convert_asa_postgresql_constructs
         working_text, structural_trace = convert_asa_postgresql_constructs(
-            working_text, preliminary_target_type
+            working_text, preliminary_target_type, source_catalog=source_catalog
         )
         working_text = _convert_asa_local_temporary_tables(working_text)
         from asa_control_flow import convert_asa_control_flow

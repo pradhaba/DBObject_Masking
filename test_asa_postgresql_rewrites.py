@@ -3,6 +3,16 @@ from asa_postgresql_rewrites import convert_asa_postgresql_constructs
 from migration_engine import _apply_table_alias_policy, _unqualified_masked_column_diagnostics
 
 class AsaPostgresqlRewriteTests(unittest.TestCase):
+    class SourceCatalog:
+        types = {
+            ('dba', 'staff', 'surname'): 'varchar(50)',
+            ('dba', 'staff', 'firstname'): 'varchar(50)',
+            ('dba', 'staff', 'amount'): 'numeric(12,2)',
+        }
+
+        def column_type(self, schema, table, column):
+            return self.types.get((schema.lower(), table.lower(), column.lower()))
+
     def test_nested_top_and_first_move_to_query_end(self):
         source="SELECT (SELECT TOP 1 started FROM periods ORDER BY started), (SELECT FIRST id FROM items);"
         converted,_=convert_asa_postgresql_constructs(source,'function')
@@ -58,6 +68,37 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         converted, _ = convert_asa_postgresql_constructs(source, 'function')
         self.assertIn("CONCAT(CONCAT(first_name, ' '), last_name)", converted)
         self.assertIn("n + 1", converted)
+
+    def test_qualified_character_plus_uses_source_catalog_type_evidence(self):
+        source = """SELECT sta.surname + ' ' + sta.firstname, sta.amount + 1
+        FROM dba.staff AS sta;"""
+        converted, trace = convert_asa_postgresql_constructs(
+            source, 'function', source_catalog=self.SourceCatalog()
+        )
+        self.assertIn("CONCAT(CONCAT(sta.surname, ' '), sta.firstname)", converted)
+        self.assertIn("sta.amount + 1", converted)
+        self.assertTrue(any(
+            item['rules'][0]['rule_code'] == 'asa-pg-operator-string-plus'
+            for item in trace
+        ))
+
+    def test_three_argument_ifnull_uses_conditional_semantics(self):
+        source = "SELECT IFNULL(sta.surname, usr.user_name, sta.surname + ' ' + sta.firstname);"
+        converted, trace = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn(
+            "CASE WHEN sta.surname IS NULL THEN usr.user_name ELSE sta.surname + ' ' + sta.firstname END",
+            converted,
+        )
+        self.assertNotIn('IFNULL', converted.upper())
+        self.assertTrue(any(
+            item['rules'][0]['rule_code'] == 'asa-pg-function-ifnull'
+            for item in trace
+        ))
+
+    def test_two_argument_and_nested_ifnull_use_coalesce_and_case(self):
+        source = "SELECT IFNULL(IFNULL(a, b), c, d);"
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertEqual(converted, "SELECT (CASE WHEN COALESCE(a, b) IS NULL THEN c ELSE d END);")
 
     def test_nested_join_conversion_preserves_outer_where_predicates(self):
         source = '''CREATE PROCEDURE dba.PROC_1(IN PARAM_1 INTEGER)

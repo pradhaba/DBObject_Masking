@@ -1,0 +1,23 @@
+{
+  "source_dialect": "sybase_asa",
+  "target_dialect": "postgresql",
+  "source_version": "17",
+  "target_version": "12+",
+  "catalog_version": 3,
+  "elements": [
+    {
+      "code": "asa-pg-function-ifnull",
+      "kind": "function",
+      "disposition": "signature_rewrite",
+      "source_pattern": "\\bIFNULL\\s*\\(",
+      "match_mode": "renderer",
+      "renderer": "convert_ifnull_by_arity",
+      "target_template": "COALESCE(a,b) or CASE WHEN a IS NULL THEN b ELSE c END",
+      "sections": ["body"],
+      "priority": 411,
+      "risk_level": "medium",
+      "verification_status": "verified",
+      "notes": "Two arguments use COALESCE. Three arguments use ASA conditional semantics and require CASE. Supported by approved lesson lesson-16de7f492864ec10bbdc."
+    }
+  ]
+}
