@@ -198,12 +198,11 @@ def _convert_ifnull(sql):
 
 def _convert_character_plus(sql, source_catalog=None):
     """Convert provably-character ASA + chains to PostgreSQL ||."""
-    character_names = set()
-    for match in re.finditer(
-        r'\b(?:IN|OUT|INOUT|DECLARE)\s+(@?[A-Za-z_]\w*)\s+'
-        r'(?:LONG\s+VARCHAR|VARCHAR|CHAR|NCHAR|NVARCHAR|TEXT)\b', sql, re.I,
-    ):
-        character_names.add(match.group(1).lower())
+    declared_types = _routine_symbol_types(sql)
+    character_names = {
+        name for name, data_type in declared_types.items()
+        if _is_character_type(data_type)
+    }
     column_types = _column_type_lookup(sql, source_catalog)
     identifier = r'(?:(?:"[^"]+"|[A-Za-z_]\w*)\.)?(?:"[^"]+"|@?[A-Za-z_]\w*)'
     operand = rf"(?:'(?:''|[^'])*'|{identifier}|__ASA_STRING_CONCAT__\s*\([^()]*\)|CAST\s*\([^()]+\s+AS\s+(?:VAR)?CHAR(?:\s*\(\s*\d+\s*\))?\s*\))"
@@ -283,6 +282,64 @@ def _is_character_type(data_type):
         r'\b(?:CHAR|CHARACTER|VARCHAR|NCHAR|NVARCHAR|TEXT|CLOB|LONG\s+VARCHAR)\b',
         str(data_type), re.I,
     ))
+
+
+def _routine_symbol_types(sql):
+    """Build a lightweight ASA parameter/local-variable datatype table."""
+    symbols = {}
+    declaration = re.search(
+        r'\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PROC(?:EDURE)?|FUNCTION)\s+'
+        r'[\w.$"\[\]]+', sql, re.I,
+    )
+    if declaration:
+        opening = sql.find('(', declaration.end())
+        if opening >= 0:
+            closing = _matching_paren(sql, opening)
+            if closing is not None:
+                for parameter in _split_arguments(sql[opening + 1:closing]):
+                    match = re.match(
+                        r'\s*(?:(?:INOUT|IN|OUT)\s+)?'
+                        r'(?P<name>@?(?:"[^"]+"|[A-Za-z_]\w*))\s+'
+                        r'(?P<type>.+?)\s*$', parameter, re.I | re.S,
+                    )
+                    if match:
+                        symbols[_symbol_name(match.group('name'))] = _declared_type(match.group('type'))
+
+    for match in re.finditer(r'\bDECLARE\s+(?P<clause>.*?);', sql, re.I | re.S):
+        clause = match.group('clause').strip()
+        if re.match(r'^(?:LOCAL\s+TEMPORARY\s+TABLE|(?:DYNAMIC\s+)?(?:SCROLL\s+)?CURSOR)\b', clause, re.I):
+            continue
+        pending_names = []
+        for item in _split_arguments(clause):
+            item_match = re.match(
+                r'\s*(?P<name>@?(?:"[^"]+"|[A-Za-z_]\w*))'
+                r'(?:\s+(?P<type>.+?))?\s*$', item, re.I | re.S,
+            )
+            if not item_match:
+                pending_names = []
+                continue
+            name = _symbol_name(item_match.group('name'))
+            raw_type = item_match.group('type')
+            if not raw_type:
+                pending_names.append(name)
+                continue
+            data_type = _declared_type(raw_type)
+            for declared_name in pending_names + [name]:
+                symbols[declared_name] = data_type
+            pending_names = []
+    return symbols
+
+
+def _symbol_name(value):
+    value = value.strip()
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1].replace('""', '"')
+    return value.lower()
+
+
+def _declared_type(value):
+    value = re.split(r'\bDEFAULT\b|:=|(?<![<>!])=(?!=)', value, maxsplit=1, flags=re.I)[0]
+    return re.sub(r'/\*.*?\*/', '', value, flags=re.S).strip()
 
 
 def _column_type_lookup(sql, source_catalog):

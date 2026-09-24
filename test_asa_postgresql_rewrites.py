@@ -69,6 +69,24 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         self.assertIn("(first_name || ' ' || last_name)", converted)
         self.assertIn("n + 1", converted)
 
+    def test_parameter_types_are_inferred_without_explicit_in_mode(self):
+        source = """CREATE FUNCTION f(first_name VARCHAR(20), last_name LONG VARCHAR, n INTEGER)
+        BEGIN SELECT first_name + last_name, n + 1; END;"""
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn('(first_name || last_name)', converted)
+        self.assertIn('n + 1', converted)
+
+    def test_local_variable_types_include_at_names_and_shared_declarations(self):
+        source = """CREATE PROCEDURE p()
+        BEGIN
+          DECLARE @first_name, @last_name VARCHAR(50);
+          DECLARE amount NUMERIC(12,2);
+          SELECT @first_name + @last_name, amount + 1;
+        END;"""
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn('(@first_name || @last_name)', converted)
+        self.assertIn('amount + 1', converted)
+
     def test_qualified_character_plus_uses_source_catalog_type_evidence(self):
         source = """SELECT sta.surname + ' ' + sta.firstname, sta.amount + 1
         FROM dba.staff AS sta;"""
