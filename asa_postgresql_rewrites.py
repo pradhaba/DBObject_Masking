@@ -26,7 +26,7 @@ def convert_asa_postgresql_constructs(sql: str, target_type: str,
     sql,count=_convert_list_aggregate(sql); _trace(trace,'asa-pg-function-list',count,'LIST','COALESCE(string_agg(...), \'\')')
     sql,count=_convert_locate(sql); _trace(trace,'asa-pg-function-locate',count,'LOCATE','strpos')
     sql,count=_convert_ifnull(sql); _trace(trace,'asa-pg-function-ifnull',count,'IFNULL','CASE/COALESCE')
-    sql,count=_convert_character_plus(sql, source_catalog); _trace(trace,'asa-pg-operator-string-plus',count,'character + character','CONCAT')
+    sql,count=_convert_character_plus(sql, source_catalog); _trace(trace,'asa-pg-operator-string-plus',count,'character + character','||')
     if target_type=='function':
         sql,count=_move_function_transactions_to_caller(sql); _trace(trace,'asa-function-caller-transaction',count,'COMMIT','caller-managed transaction')
     return sql,trace
@@ -197,7 +197,7 @@ def _convert_ifnull(sql):
 
 
 def _convert_character_plus(sql, source_catalog=None):
-    """Convert only provably-character ASA + expressions, preserving NULL behavior."""
+    """Convert provably-character ASA + chains to PostgreSQL ||."""
     character_names = set()
     for match in re.finditer(
         r'\b(?:IN|OUT|INOUT|DECLARE)\s+(@?[A-Za-z_]\w*)\s+'
@@ -206,19 +206,28 @@ def _convert_character_plus(sql, source_catalog=None):
         character_names.add(match.group(1).lower())
     column_types = _column_type_lookup(sql, source_catalog)
     identifier = r'(?:(?:"[^"]+"|[A-Za-z_]\w*)\.)?(?:"[^"]+"|@?[A-Za-z_]\w*)'
-    operand = rf"(?:'(?:''|[^'])*'|{identifier}|CONCAT\s*\([^()]*\)|CAST\s*\([^()]+\s+AS\s+(?:VAR)?CHAR(?:\s*\(\s*\d+\s*\))?\s*\))"
+    operand = rf"(?:'(?:''|[^'])*'|{identifier}|__ASA_STRING_CONCAT__\s*\([^()]*\)|CAST\s*\([^()]+\s+AS\s+(?:VAR)?CHAR(?:\s*\(\s*\d+\s*\))?\s*\))"
     pattern = re.compile(rf'(?P<left>{operand})\s*\+\s*(?P<right>{operand})', re.I)
     total = 0
     while True:
         replacement = None
         for match in pattern.finditer(sql):
             left, right = match.group('left'), match.group('right')
-            if (_known_character_operand(left, character_names, column_types)
-                    and _known_character_operand(right, character_names, column_types)):
-                replacement = (match, f"CONCAT({left}, {right})")
+            left_character = _known_character_operand(left, character_names, column_types)
+            right_character = _known_character_operand(right, character_names, column_types)
+            # A character literal/operand makes an ASA + chain a character
+            # expression even when offline column metadata is absent. The
+            # temporary marker lets later passes consume an entire + chain.
+            inferred_chain = (
+                left_character and _is_identifier_operand(right)
+            ) or (
+                right_character and _is_identifier_operand(left)
+            )
+            if (left_character and right_character) or inferred_chain:
+                replacement = (match, f"__ASA_STRING_CONCAT__({left}, {right})")
                 break
         if replacement is None:
-            return sql, total
+            return _render_string_concat_markers(sql), total
         match, value = replacement
         sql = sql[:match.start()] + value + sql[match.end():]
         total += 1
@@ -227,8 +236,46 @@ def _convert_character_plus(sql, source_catalog=None):
 def _known_character_operand(value, names, column_types=None):
     value = value.strip()
     return (value.startswith("'") or value.lower() in names
-            or bool(re.match(r'^(?:CAST|CONCAT)\b', value, re.I))
+            or bool(re.match(r'^(?:CAST|__ASA_STRING_CONCAT__)\b', value, re.I))
             or (column_types is not None and _is_character_type(column_types(value))))
+
+
+def _render_string_concat_markers(sql):
+    marker = '__ASA_STRING_CONCAT__'
+    while marker in sql:
+        start = sql.find(marker)
+        open_at = sql.find('(', start + len(marker))
+        close = _matching_paren(sql, open_at)
+        if open_at < 0 or close is None:
+            break
+        expression = sql[start:close + 1]
+        parts = _string_concat_parts(expression)
+        if len(parts) < 2:
+            break
+        sql = sql[:start] + '(' + ' || '.join(parts) + ')' + sql[close + 1:]
+    return sql
+
+
+def _string_concat_parts(expression):
+    marker = '__ASA_STRING_CONCAT__'
+    value = expression.strip()
+    match = re.match(rf'^{marker}\s*\(', value, re.I)
+    if not match:
+        return [value]
+    close = _matching_paren(value, match.end() - 1)
+    if close != len(value) - 1:
+        return [value]
+    arguments = _split_arguments(value[match.end():close])
+    if len(arguments) != 2:
+        return [value]
+    return _string_concat_parts(arguments[0]) + _string_concat_parts(arguments[1])
+
+
+def _is_identifier_operand(value):
+    return bool(re.fullmatch(
+        r'(?:(?:"[^"]+"|[A-Za-z_]\w*)\.)?(?:"[^"]+"|@?[A-Za-z_]\w*)',
+        value.strip(), re.I,
+    ))
 
 
 def _is_character_type(data_type):

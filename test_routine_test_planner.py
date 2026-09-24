@@ -27,6 +27,19 @@ class RoutineTestPlannerTests(unittest.TestCase):
         self.assertEqual(table['status'], 'empty')
         self.assertEqual(table['target_rows'], 0)
 
+    def test_table_findings_export_lists_has_rows_empty_missing_and_not_checked(self):
+        from routine_test_planner import format_table_findings
+        plan = {'tables': [
+            {'name': 'dba.staff', 'source_status': 'available', 'target_status': 'empty'},
+            {'name': 'dba.users', 'source_status': 'missing', 'target_status': 'available'},
+            {'name': 'dba.settings'},
+        ]}
+        exported = format_table_findings(plan)
+        self.assertIn('Table\tSource data\tTarget data\tFinding', exported)
+        self.assertIn('dba.staff\tHas rows\tEmpty\ttarget: empty', exported)
+        self.assertIn('dba.users\tMissing/unavailable\tHas rows\tsource: missing/unavailable', exported)
+        self.assertIn('dba.settings\tNot checked\tNot checked\tNot checked', exported)
+
     def test_target_dependencies_are_merged_and_local_temp_table_is_excluded(self):
         from routine_test_planner import build_routine_test_plan
         source = '''CREATE PROCEDURE dba.p(IN p_id INTEGER) BEGIN
@@ -42,6 +55,17 @@ class RoutineTestPlannerTests(unittest.TestCase):
         self.assertIn('dba.staff', names)
         self.assertNotIn('tmp_rows', names)
         self.assertNotIn('pg_temp.tmp_rows', names)
+
+    def test_unqualified_persistent_tables_use_dba_schema(self):
+        from routine_test_planner import build_routine_test_plan
+        plan = build_routine_test_plan('''CREATE PROCEDURE dba.p(IN p_id INTEGER) BEGIN
+        SELECT s.id FROM staff AS s JOIN dba.users AS u ON u.id=s.user_id
+        WHERE s.id=p_id; END;''')
+        names = {item['name'] for item in plan['tables']}
+        self.assertIn('dba.staff', names)
+        self.assertIn('dba.users', names)
+        suggestion = next(item for item in plan['suggestions'] if item['parameter'] == 'p_id')
+        self.assertEqual(suggestion['table'], 'dba.staff')
 
     def test_generates_table_function_scalar_function_and_procedure_calls(self):
         from routine_test_planner import build_routine_test_plan, generate_invocation_sql

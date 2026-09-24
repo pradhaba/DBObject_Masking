@@ -1,0 +1,23 @@
+{
+  "source_dialect": "sybase_asa",
+  "target_dialect": "postgresql",
+  "source_version": "17",
+  "target_version": "12+",
+  "catalog_version": 4,
+  "elements": [
+    {
+      "code": "asa-pg-operator-string-plus",
+      "kind": "operator",
+      "disposition": "type_dependent",
+      "source_pattern": "\\+",
+      "match_mode": "renderer",
+      "renderer": "convert_character_plus_to_pipe_operator",
+      "target_template": "left || right",
+      "sections": ["body"],
+      "priority": 600,
+      "risk_level": "medium",
+      "verification_status": "verified",
+      "notes": "Character-valued ASA + chains map to PostgreSQL ||. Numeric + remains unchanged. A quoted literal or source datatype evidence establishes character context. PostgreSQL || propagates NULL, matching the approved project migration convention."
+    }
+  ]
+}

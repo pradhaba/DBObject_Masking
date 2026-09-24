@@ -192,6 +192,36 @@ def apply_data_findings(plan: dict, side: str, row_counts: dict[str, int | None]
     return plan
 
 
+def table_data_state(table: dict, side: str) -> str:
+    """Return a human-readable dependency state for the test-plan UI/export."""
+    status = table.get(f"{side}_status")
+    if status == "available":
+        return "Has rows"
+    if status == "empty":
+        return "Empty"
+    if status == "missing":
+        return "Missing/unavailable"
+    return "Not checked"
+
+
+def format_table_findings(plan: dict) -> str:
+    """Create a clipboard-friendly TSV inventory of routine dependencies."""
+    lines = ["Table\tSource data\tTarget data\tFinding"]
+    for table in plan.get("tables", []):
+        source = table_data_state(table, "source")
+        target = table_data_state(table, "target")
+        findings = []
+        if source in {"Empty", "Missing/unavailable"}:
+            findings.append(f"source: {source.lower()}")
+        if target in {"Empty", "Missing/unavailable"}:
+            findings.append(f"target: {target.lower()}")
+        finding = "; ".join(findings) or (
+            "Data available" if "Has rows" in {source, target} else "Not checked"
+        )
+        lines.append(f"{table['name']}\t{source}\t{target}\t{finding}")
+    return "\n".join(lines)
+
+
 def collect_data_findings(connection, plan: dict, side: str, database_type: str = "PostgreSQL",
                           derive_parameter_values: bool = True) -> dict:
     """Check table availability and optionally derive parameter values read-only."""
@@ -404,7 +434,7 @@ def _table_aliases(sql: str) -> dict[str, str]:
     qualified = rf'{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})?'
     for match in re.finditer(rf'\b(?:FROM|JOIN)\s+({qualified})\s+(?:AS\s+)?({_IDENTIFIER})', sql, re.I):
         table = '.'.join(_unquote(part.strip()) for part in re.split(r'\s*\.\s*', match.group(1)))
-        aliases[_unquote(match.group(2)).lower()] = table
+        aliases[_unquote(match.group(2)).lower()] = _qualify_table_name(table)
     return aliases
 
 
@@ -412,11 +442,22 @@ def _tables(sql: str) -> list[dict]:
     names = []
     qualified = rf'{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})?'
     for match in re.finditer(rf'\b(?:FROM|JOIN|UPDATE|INSERT\s+INTO)\s+({qualified})', sql, re.I):
-        name = '.'.join(_unquote(part.strip()) for part in re.split(r'\s*\.\s*', match.group(1)))
-        if name.lower() not in {item.lower() for item in names} and not name.lower().startswith(('select', 'pg_temp.')):
+        raw_name = '.'.join(_unquote(part.strip()) for part in re.split(r'\s*\.\s*', match.group(1)))
+        if raw_name.lower().startswith(('select', 'pg_temp.')):
+            continue
+        name = _qualify_table_name(raw_name)
+        if name.lower() not in {item.lower() for item in names}:
             names.append(name)
     return [{"name": name, "source_rows": None, "target_rows": None, "status": "not_checked"} for name in names]
 
 
 def _unquote(value: str) -> str:
     return value[1:-1].replace('""', '"') if value.startswith('"') and value.endswith('"') else value
+
+
+def _qualify_table_name(name: str, default_schema: str = "dba") -> str:
+    """Apply the project schema policy to persistent unqualified relations."""
+    value = name.strip()
+    if not value or '.' in value or value.lower().startswith('pg_temp.'):
+        return value
+    return f"{default_schema}.{value}"

@@ -66,7 +66,7 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         source = """CREATE FUNCTION f(IN first_name VARCHAR(20), IN last_name VARCHAR(20), IN n INTEGER)
         BEGIN SELECT first_name + ' ' + last_name, n + 1; END;"""
         converted, _ = convert_asa_postgresql_constructs(source, 'function')
-        self.assertIn("CONCAT(CONCAT(first_name, ' '), last_name)", converted)
+        self.assertIn("(first_name || ' ' || last_name)", converted)
         self.assertIn("n + 1", converted)
 
     def test_qualified_character_plus_uses_source_catalog_type_evidence(self):
@@ -75,18 +75,33 @@ class AsaPostgresqlRewriteTests(unittest.TestCase):
         converted, trace = convert_asa_postgresql_constructs(
             source, 'function', source_catalog=self.SourceCatalog()
         )
-        self.assertIn("CONCAT(CONCAT(sta.surname, ' '), sta.firstname)", converted)
+        self.assertIn("(sta.surname || ' ' || sta.firstname)", converted)
         self.assertIn("sta.amount + 1", converted)
         self.assertTrue(any(
             item['rules'][0]['rule_code'] == 'asa-pg-operator-string-plus'
             for item in trace
         ))
 
+    def test_qualified_string_chain_uses_text_literal_when_metadata_is_unavailable(self):
+        source = "SELECT sta.surname + ' ' + sta.firstname FROM dba.staff AS sta;"
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertIn("(sta.surname || ' ' || sta.firstname)", converted)
+
+    def test_quoted_literal_forces_pipe_concat_while_unquoted_number_remains_addition(self):
+        source = "SELECT unknown_value + '1';"
+        converted, _ = convert_asa_postgresql_constructs(source, 'function')
+        self.assertEqual(converted, "SELECT (unknown_value || '1');")
+
+        numeric = "SELECT unknown_value + 1;"
+        converted, _ = convert_asa_postgresql_constructs(numeric, 'function')
+        self.assertEqual(converted, numeric)
+
     def test_three_argument_ifnull_uses_conditional_semantics(self):
         source = "SELECT IFNULL(sta.surname, usr.user_name, sta.surname + ' ' + sta.firstname);"
         converted, trace = convert_asa_postgresql_constructs(source, 'function')
         self.assertIn(
-            "CASE WHEN sta.surname IS NULL THEN usr.user_name ELSE sta.surname + ' ' + sta.firstname END",
+            "CASE WHEN sta.surname IS NULL THEN usr.user_name "
+            "ELSE (sta.surname || ' ' || sta.firstname) END",
             converted,
         )
         self.assertNotIn('IFNULL', converted.upper())

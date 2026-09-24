@@ -122,7 +122,10 @@ class Launcher:
 
     def _render_routine_test_plan(self, project):
         from tkinter import simpledialog
-        from routine_test_planner import collect_data_findings, generate_invocation_sql
+        from routine_test_planner import (
+            collect_data_findings, format_table_findings, generate_invocation_sql,
+            table_data_state,
+        )
         from workflow import cache_project_password, get_project_password, open_database_connection
 
         self._activate("routine_test")
@@ -168,12 +171,14 @@ class Launcher:
         table_tree=ttk.Treeview(self.container,columns=("table","source","target","status"),show="headings",height=7)
         for key,label,width in (("table","Table",300),("source","Source data",120),("target","Target data",120),("status","Finding",160)):
             table_tree.heading(key,text=label);table_tree.column(key,width=width)
-        def data_text(value):return "Not checked" if value is None else ("Empty" if value==0 else "Available")
         def refresh_tables():
             for row in table_tree.get_children():table_tree.delete(row)
             for index,item in enumerate(plan["tables"]):
                 findings=[value for value in (item.get("source_status"),item.get("target_status")) if value]
-                table_tree.insert("",tk.END,iid=str(index),values=(item["name"],data_text(item.get("source_rows")),data_text(item.get("target_rows"))," / ".join(findings) or "not_checked"))
+                table_tree.insert("",tk.END,iid=str(index),values=(
+                    item["name"], table_data_state(item,"source"),
+                    table_data_state(item,"target"), " / ".join(findings) or "not_checked",
+                ))
         refresh_tables();table_tree.pack(fill=tk.X)
         status=tk.StringVar(value="Database data has not been checked.");ttk.Label(self.container,textvariable=status,foreground="#555").pack(anchor=tk.W,pady=8)
         results=ttk.Labelframe(self.container,text="Execution and comparison results",padding=10);results.pack(fill=tk.X,pady=(4,8))
@@ -233,8 +238,16 @@ class Launcher:
             status.set("Approved for routine execution. Parameter plan and data prerequisites passed.")
             result_status.set("Approved and ready for the execution-and-comparison stage. No routine has been executed yet.")
             messagebox.showinfo("Routine Test Plan","Test plan approved. It is ready for the execution-and-comparison stage.")
+        def copy_table_findings():
+            value=format_table_findings(plan)
+            self.root.clipboard_clear();self.root.clipboard_append(value);self.root.update_idletasks()
+            messagebox.showinfo(
+                "Routine Test Plan",
+                f"Copied {len(plan['tables'])} table finding(s) to the clipboard.",
+            )
         actions=ttk.Frame(self.container);actions.pack(fill=tk.X,pady=10)
         ttk.Button(actions,text="Recheck tables and destination values",command=check_data).pack(side=tk.LEFT)
+        ttk.Button(actions,text="Copy table findings",command=copy_table_findings).pack(side=tk.LEFT,padx=8)
         ttk.Button(actions,text="Approve test plan",command=approve).pack(side=tk.LEFT,padx=8)
         self.root.after_idle(lambda: run_data_checks(["target"],automatic=True))
 
